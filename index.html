@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DubAnalytics Premium · Gestão Inteligente</title>
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dm-sans@5.0.17/index.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dm-mono@5.0.14/index.css">
+  <link rel="stylesheet" href="dashboard.css">
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body id="dub-app">
+  
+  <!-- MOBILE TOP BAR -->
+  <div class="mobile-top-bar">
+    <button id="menu-toggle" onclick="toggleMobileMenu()" title="Abrir Menu">☰</button>
+    <div class="mobile-logo">DubAnalytics</div>
+    <div id="mobile-view-title">Visão Global</div>
+  </div>
+
+  <!-- OVERLAY FOR MOBILE SIDEBAR -->
+  <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
+
+  <!-- LEFT SIDEBAR -->
+  <aside id="sidebar">
+    <div class="sb-header">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <div>
+          <div style="font-weight:700; font-size:18px; color:var(--accent)">DubAnalytics</div>
+          <div style="font-size:10px; color:var(--text-dim)">Business & Performance Intelligence</div>
+        </div>
+        <button id="privacy-toggle" onclick="togglePrivacyMode()" class="btn-sidebar" title="Ocultar/Mostrar Valores (Modo Privacidade)" style="font-size:16px; opacity:0.8">👁️</button>
+      </div>
+    </div>
+    
+    <nav style="flex:1; overflow-y:auto; padding-top:10px">
+      <div class="nav-item active" data-view="general" onclick="showView('general')">
+        <span>🌍</span> Visão Global
+      </div>
+      
+      <div style="padding:20px 20px 5px; font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.1em; display:flex; justify-content:space-between; align-items:center">
+        Meus Clientes
+        <button onclick="openClientModal()" style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:14px" title="Novo Cliente">➕</button>
+      </div>
+      <div id="sidebar-client-list"></div>
+    </nav>
+    
+    <div id="sidebar-footer" style="padding:15px; border-top: 1px solid var(--border); display:flex; flex-direction:column; gap:8px">
+       <div id="sync-progress-box" style="display:none; margin-bottom:10px">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+             <span id="sync-status-text" style="font-size:9px; font-weight:700; color:var(--accent); text-transform:uppercase">Sincronizando...</span>
+             <span id="sync-status-percent" style="font-size:9px; color:var(--text-dim)">0%</span>
+          </div>
+          <div style="height:4px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden">
+             <div id="sync-progress-bar" style="width:0%; height:100%; background:var(--accent); transition:width 0.3s ease"></div>
+          </div>
+       </div>
+       <div id="user-info-box" style="margin-bottom: 10px"></div>
+       <button class="btn-ghost" onclick="showView('import')" style="font-size:11px; text-align:left">📥 Importar Excel</button>
+       <button class="btn-ghost" onclick="exportBackup()" style="font-size:11px; text-align:left">💾 Backup (JSON)</button>
+       <div style="font-size:9px; color:var(--text-dim); margin-top:5px">v3.0 PREMIUM</div>
+    </div>
+  </aside>
+
+  <!-- MAIN WORKSPACE -->
+  <main id="main">
+    
+    <!-- VIEW: GENERAL OVERVIEW -->
+    <div id="general-view" class="view active">
+      <header class="view-header">
+        <h1>🌍 Consolidação do Trabalho</h1>
+        <div class="header-actions">
+          <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir ganhos históricos de clientes arquivados/inativos">
+            <input type="checkbox" id="gen-show-inactive" onchange="toggleShowInactive(this.checked)" checked> 
+            Exibir Inativos
+          </label>
+          <select id="gen-year" onchange="State.filters.year = this.value; renderGeneralAnalytics();"></select>
+          <select id="gen-timeframe" onchange="State.filters.timeframe = this.value; renderGeneralAnalytics();">
+             <option value="month">Mensal</option>
+             <option value="quarter">Trimestral</option>
+             <option value="semester">Semestral</option>
+             <option value="year">Anual</option>
+          </select>
+          <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
+        </div>
+      </header>
+      <section class="container" style="overflow-y:auto; flex:1">
+         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
+            <div class="card"><small>GANHO TOTAL</small><div id="gen-total-earnings" class="stat-value text-success">R$ 0,00</div></div>
+            <div class="card"><small>MÉDIA POR MÊS</small><div id="gen-avg-earnings-month" class="stat-value text-success">R$ 0,00</div></div>
+            <div class="card"><small>VÍDEOS ENTREGUES</small><div id="gen-total-videos" class="stat-value">0</div></div>
+            <div class="card"><small>RATIO MÉDIO</small><div id="gen-avg-ratio" class="stat-value text-accent">0.0x</div></div>
+            <div class="card"><small>CLIENTES ATIVOS</small><div id="gen-active-clients" class="stat-value">0</div></div>
+            <div class="card"><small>LUCRO / HORA</small><div id="gen-per-hour" class="stat-value text-success">R$ 0,00</div></div>
+         </div>
+         <div class="stats-grid" style="margin-top:20px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+            <div class="card"><small>TOTAL ESFORÇO ACUMULADO</small><div id="gen-total-hours" class="stat-value">00:00:00</div></div>
+            <div class="card"><small>VELOCIDADE (CHARS/H)</small><div id="gen-chars-per-hour" class="stat-value">0 k/h</div></div>
+            <div class="card"><small>MÉDIA POR VÍDEO</small><div id="gen-avg-per-video" class="stat-value">00:00:00</div></div>
+         </div>
+         
+         <div class="card" style="padding:20px; margin-top:20px">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
+                <h2 style="font-size:15px; margin:0">Crescimento e Performance</h2>
+                <div style="font-size:11px; color:#10b981; font-weight:600">▲ EFICIÊNCIA MONITORADA</div>
+            </div>
+            <div class="chart-container" style="height:300px"><canvas id="main-chart-canvas"></canvas></div>
+         </div>
+
+         <!-- Seção de Inteligência Avançada -->
+         <div id="gen-advanced-section"></div>
+      </section>
+    </div>
+
+    <!-- VIEW: CLIENT DASHBOARD -->
+    <div id="client-view" class="view">
+       <div class="client-view-inner">
+          <!-- Client Month Sub-sidebar -->
+          <aside id="client-month-sidebar">
+             <div class="month-sb-header" style="flex-wrap:wrap; gap:5px">
+                <div style="display:flex; align-items:center; gap:5px; flex:1; min-width:0">
+                   <h2 id="client-title" style="font-size:16px; margin:0">Cliente</h2>
+                   <button onclick="if(State.selectedClient) openClientModal(State.selectedClient.id)" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:2px" title="Renomear cliente">✎</button>
+                </div>
+                <button onclick="openMonthModal()" class="btn-add-month">+ Mês</button>
+             </div>
+             <div id="month-list" class="month-list"></div>
+          </aside>
+          
+          <!-- CLIENT OVERVIEW -->
+          <div id="client-overview-section" class="month-content">
+             <header class="view-header" style="padding:15px 30px">
+                <h1 style="font-size:20px; margin:0">📊 Perfil de Rentabilidade</h1>
+                <div class="header-actions">
+                   <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
+                </div>
+             </header>
+             <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
+                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr))">
+                   <div class="card"><small>GANHO TOTAL</small><div id="co-earnings" class="stat-value text-success">R$ 0,00</div></div>
+                   <div class="card"><small>MÉDIA POR MÊS</small><div id="co-avg-earnings-month" class="stat-value text-success">R$ 0,00</div></div>
+                   <div class="card"><small>ENTREGAS</small><div id="co-videos" class="stat-value">0/0</div></div>
+                   <div class="card"><small>RATIO CARACTER</small><div id="co-ratio-char" class="stat-value text-accent" style="font-size:18px">0.00s</div></div>
+                   <div class="card"><small>RATIO TEMPO</small><div id="co-ratio" class="stat-value text-accent">0.0x</div></div>
+                </div>
+                <div class="stats-grid" style="margin-top:20px">
+                    <div class="card"><small>ESFORÇO LÍQUIDO</small><div id="co-hours" class="stat-value">00:00:00</div></div>
+                    <div class="card"><small>MÉDIA POR VÍDEO</small><div id="co-avg-per-video" class="stat-value">00:00:00</div></div>
+                    <div class="card"><small>CHARS / HORA</small><div id="co-chars-per-hour" class="stat-value">0 k/h</div></div>
+                    <div class="card" title="R$ real por hora de trabalho"><small>VALOR / HORA</small><div id="co-per-hour" class="stat-value text-success">R$ 0,00</div></div>
+                </div>
+
+                <div class="card" style="padding:20px; margin-top:20px">
+                   <h2 style="font-size:15px; margin-bottom:10px">Evolução Mensal (Ratio vs Ganhos)</h2>
+                   <div class="chart-container" style="height:250px"><canvas id="client-overview-chart"></canvas></div>
+                </div>
+                
+                <!-- Advanced Stats for Client -->
+                <div id="co-advanced-section"></div>
+             </div>
+          </div>
+          
+          <!-- MONTH DETAILS -->
+          <div id="month-details-section" class="month-content">
+             <header id="month-header" class="view-header" style="padding:15px 30px">
+                <div style="display:flex; flex-direction:column">
+                   <h1 id="month-label" style="font-size:20px; margin:0">Mês</h1>
+                   <small id="month-period" style="color:var(--text-dim)"></small>
+                </div>
+                <div class="header-actions">
+                   <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
+                   <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
+                   <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
+                </div>
+             </header>
+             
+             <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
+                <div id="month-config-bar" class="card config-bar">
+                   <div class="cfg-item"><span>Preço/Vídeo:</span> <input type="number" id="cfg-ppv" onchange="updateMonthConfig('price_per_video', this.value)"></div>
+                   <div class="cfg-item"><span>Base R$:</span> <input type="number" id="cfg-base" onchange="updateMonthConfig('base_payment', this.value)"></div>
+                   <div class="cfg-item"><span>Base Vídeos:</span> <input type="number" id="cfg-bvid" onchange="updateMonthConfig('base_videos', this.value)"></div>
+                   <div class="cfg-item"><span>Bônus R$:</span> <input type="number" id="cfg-bonus" onchange="updateMonthConfig('bonus', this.value)"></div>
+                   <div class="cfg-item" title="Ativar compensação acumulada de vídeos (débito/crédito)"><span>Compensar?</span> <label class="switch"><input type="checkbox" id="cfg-comp" onchange="updateMonthConfig('compensate', this.checked)"><span class="slider"></span></label></div>
+                </div>
+
+                <div class="stats-grid" style="grid-template-columns:repeat(auto-fit, minmax(140px, 1fr))">
+                   <div class="card"><small>ENTREGUES</small><div id="m-stat-done" class="stat-value">0/0</div></div>
+                   <div class="card" title="Saldo acumulado de vídeos (Entregues - Base)"><small>SALDO VÍDEOS</small><div id="m-stat-balance" class="stat-value">0</div></div>
+                   <div class="card"><small>GANHO MÊS</small><div id="m-stat-pay" class="stat-value text-accent">R$ 0</div></div>
+                   <div class="card"><small>TRABALHADO</small><div id="m-stat-hours" class="stat-value">00:00:00</div></div>
+                   <div class="card"><small>RATIO MÊS</small><div id="m-stat-ratio" class="stat-value text-accent">0.0x</div></div>
+                   <div class="card"><small>R$ / HORA</small><div id="m-stat-per-hour" class="stat-value text-success">R$ 0</div></div>
+                </div>
+
+                <div class="card table-card">
+                   <table id="video-table">
+                      <thead>
+                         <tr>
+                            <th>Status</th><th>Transc.</th><th>Título</th><th>Idiomas</th><th>Chars</th><th>Ratio</th><th>Tempo</th><th>Ações</th>
+                         </tr>
+                      </thead>
+                      <tbody id="video-tbody"></tbody>
+                   </table>
+                </div>
+             </div>
+          </div>
+
+          <!-- BENCHMARKS VIEW -->
+          <div id="benchmarks-section" class="month-content">
+             <header class="view-header" style="padding:15px 30px">
+                <h1 style="font-size:20px; margin:0">🎯 Benchmarks & Inteligência de Preço</h1>
+                <div class="header-actions">
+                   <div style="font-size:11px; color:var(--text-dim)">Meta R$/Hora:</div>
+                   <input type="number" id="target-rate-input" value="60" style="width:85px" onchange="updateTargetRate(this.value)">
+                </div>
+             </header>
+             <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
+                <p style="font-size:13px; color:var(--text-dim); margin-bottom:20px">Baseado no esforço real dos seus vídeos marcados como "Teste", aqui está quanto você deveria cobrar para atingir sua meta por hora.</p>
+                <div id="benchmark-list" class="stats-grid" style="grid-template-columns: 1fr"></div>
+             </div>
+          </div>
+       </div>
+    </div>
+
+    <!-- VIEW: IMPORT -->
+    <div id="import-view" class="view">
+       <div class="container centered-container">
+          <div class="card import-card">
+             <div class="icon-hero">🚀</div>
+             <h2>Central de Inteligência</h2>
+             <p>Importe seus Excels (SanInPlay, Lipão, Laércio) ou o Backup (JSON) para consolidar seus dados.</p>
+             <label for="import-input" class="btn-primary">SELECIONAR ARQUIVOS</label>
+             <input type="file" id="import-input" multiple hidden accept=".xlsx,.json">
+             <div id="import-status" style="margin-top:15px; font-size:13px"></div>
+          </div>
+       </div>
+    </div>
+
+  </main>
+
+  <!-- MODALS -->
+  <div id="modal-overlay" class="modal-overlay">
+     <div id="modal-box" class="modal"></div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

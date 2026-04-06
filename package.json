@@ -1,0 +1,21 @@
+{
+  "name": "dub-analytics-premium",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "firebase": "^10.7.0",
+    "chart.js": "^4.4.1",
+    "xlsx": "^0.18.5",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.5.31"
+  }
+}

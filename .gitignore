@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing and Debug
+results.json
+extracted_data.txt
+*.log
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build
+dist/
+build/
+
+# Analysis and Source Data (Not needed for the web app)
+*.xlsx
+*.py
+relatorio_produtividade_2024_2026.md
+
+# OS Files
+.DS_Store
+Thumbs.db
