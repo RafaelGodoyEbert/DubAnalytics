@@ -86,6 +86,10 @@
              <option value="semester">Semestral</option>
              <option value="year">Anual</option>
           </select>
+          <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir métricas de esforço (tempo) no PDF">
+            <input type="checkbox" id="pdf-show-time" onchange="document.getElementById('pdf-show-time-client').checked = this.checked; document.getElementById('pdf-show-time-month').checked = this.checked;"> 
+            Exportar com Tempo
+          </label>
           <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
         </div>
       </header>
@@ -136,9 +140,13 @@
           <div id="client-overview-section" class="month-content">
              <header class="view-header" style="padding:15px 30px">
                 <h1 style="font-size:20px; margin:0">📊 Perfil de Rentabilidade</h1>
-                <div class="header-actions">
-                   <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
-                </div>
+                 <div class="header-actions">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir métricas de esforço (tempo) no PDF">
+                      <input type="checkbox" id="pdf-show-time-client" onchange="document.getElementById('pdf-show-time-month').checked = this.checked; document.getElementById('pdf-show-time').checked = this.checked;"> 
+                      Exportar com Tempo
+                    </label>
+                    <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
+                 </div>
              </header>
              <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr))">
@@ -172,11 +180,15 @@
                    <h1 id="month-label" style="font-size:20px; margin:0">Mês</h1>
                    <small id="month-period" style="color:var(--text-dim)"></small>
                 </div>
-                <div class="header-actions">
-                   <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
-                   <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
-                   <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
-                </div>
+                 <div class="header-actions">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir métricas de esforço (tempo) no PDF">
+                      <input type="checkbox" id="pdf-show-time-month" onchange="document.getElementById('pdf-show-time-client').checked = this.checked; document.getElementById('pdf-show-time').checked = this.checked;"> 
+                      Exportar com Tempo
+                    </label>
+                    <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
+                    <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
+                    <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
+                 </div>
              </header>
              
              <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
@@ -248,6 +260,6 @@
      <div id="modal-box" class="modal"></div>
   </div>
 
-  <script type="module" src="main.js"></script>
+  <script type="module" src="main.js?v=3.5"></script>
 </body>
 </html>

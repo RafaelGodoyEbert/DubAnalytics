@@ -3,6 +3,49 @@
 const MONTH_NAMES = 'Jan Fev Mar Abr Mai Jun Jul Ago Set Out Nov Dez'.split(' ');
 
 /**
+ * Converts a string to ASCII-safe characters for jsPDF (Helvetica font only supports Latin-1).
+ * jsPDF internally corrupts non-ASCII chars by inserting & between bytes.
+ * This function is the definitive fix.
+ */
+function toSafePDF(str) {
+  if (!str || typeof str !== 'string') return str || '';
+  
+  // Step 0: Remove ALL ampersands first (they are corruption artifacts)
+  let result = str.replace(/&/g, '');
+  
+  // Step 1: Replace known non-ASCII / problematic characters with ASCII equivalents
+  const charMap = {
+    '\u2022': '-', '\u00b7': '-', '\u2019': "'", '\u2018': "'",
+    '\u2014': '-', '\u2013': '-', '\u2026': '...', '\u00A0': ' ',
+    '\u00e0': 'a', '\u00e1': 'a', '\u00e2': 'a', '\u00e3': 'a', '\u00e4': 'a',
+    '\u00e9': 'e', '\u00ea': 'e', '\u00e8': 'e', '\u00eb': 'e',
+    '\u00ed': 'i', '\u00ec': 'i', '\u00ee': 'i', '\u00ef': 'i',
+    '\u00f3': 'o', '\u00f4': 'o', '\u00f5': 'o', '\u00f2': 'o', '\u00f6': 'o',
+    '\u00fa': 'u', '\u00fb': 'u', '\u00f9': 'u', '\u00fc': 'u',
+    '\u00e7': 'c', '\u00f1': 'n',
+    '\u00c0': 'A', '\u00c1': 'A', '\u00c2': 'A', '\u00c3': 'A', '\u00c4': 'A',
+    '\u00c9': 'E', '\u00ca': 'E', '\u00c8': 'E', '\u00cb': 'E',
+    '\u00cd': 'I', '\u00cc': 'I', '\u00ce': 'I', '\u00cf': 'I',
+    '\u00d3': 'O', '\u00d4': 'O', '\u00d5': 'O', '\u00d2': 'O', '\u00d6': 'O',
+    '\u00da': 'U', '\u00db': 'U', '\u00d9': 'U', '\u00dc': 'U',
+    '\u00c7': 'C', '\u00d1': 'N'
+  };
+  
+  for (const [from, to] of Object.entries(charMap)) {
+    result = result.split(from).join(to);
+  }
+  
+  // Step 2: Aggressively strip ANY non-ASCII character (retaining only space up to ~)
+  result = result.replace(/[^\x20-\x7E]/g, '');
+  
+  // Step 3: Final cleanup of extra spaces and ampersands (just in case they were added by mis-encodings during map loop)
+  return result.replace(/&/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Alias for backwards compatibility
+const sanitize = toSafePDF;
+
+/**
  * Parses a month label like "Jan 2024" into a sortable number (202400).
  */
 function monthLabelToSortKey(label) {
@@ -79,6 +122,8 @@ function groupData(videos, configs, timeframe) {
     else { g._sortKey = monthLabelToSortKey(label); }
 
     if (v.feito) {
+      // Itens "Outros" contribuem ao faturamento mas não à contagem de vídeos
+      if (v.tipo_item === 'outros') return;
       g.count++;
       g.chars += (parseInt(v.chars) || 0);
       g.words += (parseInt(v.palavras) || 0);
@@ -124,23 +169,32 @@ function groupData(videos, configs, timeframe) {
         var baseVideos = parseFloat(config.base_videos); if (isNaN(baseVideos)) baseVideos = 15;
         var bonus = parseFloat(config.bonus); if (isNaN(bonus)) bonus = 0;
 
+        // Ganhos de itens "Outros" cobrados somam direto ao total
+        const isCobrado = v => v.feito && v.cobrado !== false;
+        const outrosEarnings = mVideos
+          .filter(v => isCobrado(v) && v.tipo_item === 'outros')
+          .reduce((s, v) => s + (parseFloat(v.valor_individual) || 0), 0);
+
+        // Somente vídeos normais COBRADOS contam para cota
+        const mVideosCobradosNormal = mVideos.filter(v => isCobrado(v) && v.tipo_item !== 'outros').length;
+
         if (config.compensate) {
-          bal.done += mVideosDone;
+          bal.done += mVideosCobradosNormal;
           bal.base += baseVideos;
 
           const cumOverage = Math.max(0, bal.done - bal.base);
           const extraToPayThisMonth = Math.max(0, cumOverage - bal.extraPaid);
           
-          groupEarnings += base + (extraToPayThisMonth * ppv) + bonus;
+          groupEarnings += base + (extraToPayThisMonth * ppv) + bonus + outrosEarnings;
           bal.extraPaid += extraToPayThisMonth;
         } else {
           // Simple Independent Logic
-          const extraToPayThisMonth = Math.max(0, mVideosDone - baseVideos);
-          groupEarnings += base + (extraToPayThisMonth * ppv) + bonus;
+          const extraToPayThisMonth = Math.max(0, mVideosCobradosNormal - baseVideos);
+          groupEarnings += base + (extraToPayThisMonth * ppv) + bonus + outrosEarnings;
           // We don't update 'bal' because this month doesn't participate in future compensations
         }
       } else {
-        groupEarnings += mVideosDone * 40;
+        groupEarnings += mVideos.filter(v => v.feito && v.cobrado !== false && v.tipo_item !== 'outros').length * 40;
       }
     });
     g.earnings = groupEarnings;
@@ -335,7 +389,7 @@ function renderCharts(canvasId, dataset, type) {
   });
 }
 
-function exportUnifiedPDF(title, dataset, summary) {
+function exportUnifiedPDF(title, dataset, summary, showTime = true) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -348,6 +402,17 @@ function exportUnifiedPDF(title, dataset, summary) {
     doc.setFillColor(10, 18, 30); 
     doc.rect(0, 0, W, H, 'F');
     return this;
+  };
+
+  // FAIL-SAFE: Intercept all text drawing to remove unwanted ampersands
+  const oldText = doc.text;
+  doc.text = function(text, x, y, options) {
+    if (typeof text === 'string') {
+        text = toSafePDF(text);
+    } else if (Array.isArray(text)) {
+        text = text.map(t => typeof t === 'string' ? toSafePDF(t) : t);
+    }
+    return oldText.call(this, text, x, y, options);
   };
 
   // Background for first page
@@ -370,11 +435,12 @@ function exportUnifiedPDF(title, dataset, summary) {
   // Target/Client Detail
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-  doc.text(title.toUpperCase(), 15, 38);
+  const safeTitle = toSafePDF(title).toUpperCase();
+  doc.text(safeTitle, 15, 38);
   
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-  doc.text('Visão Consolidada de Performance', 15, 44);
+  doc.text('Visao Consolidada de Performance', 15, 44);
   
   // KPI Section Marker
   doc.setTextColor(245, 158, 11);
@@ -382,7 +448,8 @@ function exportUnifiedPDF(title, dataset, summary) {
   doc.text('PERFORMANCE SNAPSHOT', 15, 62);
 
   // KPI Cards
-  const cardW = (W - 40) / 3;
+  const activeCardsCount = showTime ? 3 : 2;
+  const cardW = (W - 40) / activeCardsCount;
   const cardY = 66;
   const cardH = 26;
   const cardGap = 5;
@@ -395,12 +462,23 @@ function exportUnifiedPDF(title, dataset, summary) {
     doc.setFontSize(7); doc.setFont('helvetica', 'normal');
     doc.text(cardTitle.toUpperCase(), x + 6, cardY + 8);
     
+    // Split into lines if there's a newline (for extra info like +3 entregues s/ cobrança)
+    const lines = String(value).split('\n');
+    const mainValue = lines[0];
+    const subValue = lines[1] || '';
+    
     doc.setTextColor(color[0], color[1], color[2]);
     doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    doc.text(value, x + 6, cardY + 18);
+    doc.text(mainValue, x + 6, cardY + 18);
     
-    if (unit) {
-      const valW = doc.getTextWidth(value);
+    if (subValue) {
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(subValue, x + 6, cardY + 23);
+    }
+    
+    if (unit && !subValue) { // Only show unit if no subValue to avoid clutter/overlap
+      const valW = doc.getTextWidth(mainValue);
       doc.setFontSize(7); doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
       doc.text(unit, x + 8 + valW, cardY + 18);
@@ -411,27 +489,40 @@ function exportUnifiedPDF(title, dataset, summary) {
   let countTxt = String(summary.count || '0');
   let hoursTxt = String(summary.hours || '00:00:00').split('(')[0].trim();
 
-  // Clean strings based on how they were passed in previous implementation
+  // Clean strings
   earnTxt = earnTxt.replace('Ganhos: ', '');
   countTxt = countTxt.replace('Videos: ', '');
   hoursTxt = hoursTxt.replace('Horas: ', '');
 
   drawKPICard(15, 'Faturamento Total', earnTxt, '', [16, 185, 129]);
   drawKPICard(15 + cardW + cardGap, 'Vídeos Produzidos', countTxt, 'TOTAL', [255, 255, 255]);
-  drawKPICard(15 + (cardW + cardGap) * 2, 'Esforço Acumulado', hoursTxt, '', [245, 158, 11]);
+  if (showTime) {
+    drawKPICard(15 + (cardW + cardGap) * 2, 'Esforço Acumulado', hoursTxt, '', [245, 158, 11]);
+  }
 
   // Listing Table
-  doc.autoTable({
-    startY: 102,
-    head: [['PERÍODO', 'VÍDEOS', 'GANHOS (R$)', 'RATIO', 'CHARS', 'TEMPO']],
-    body: dataset.map(d => [
-      (d.label || '').toUpperCase(),
+  const tableHead = showTime 
+    ? [['PERÍODO', 'VÍDEOS', 'GANHOS (R$)', 'RATIO', 'CHARS', 'TEMPO']]
+    : [['PERÍODO', 'VÍDEOS', 'GANHOS (R$)', 'CHARS']];
+
+  const tableBody = dataset.map(d => {
+    const row = [
+      toSafePDF(d.label || '').toUpperCase(),
       d.count,
       d.earnings.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
-      d.ratio.toFixed(2) + 'x',
-      (parseInt(d.chars) || 0).toLocaleString('pt-BR'),
-      window.ExcelParser.secondsToHMS(d.time)
-    ]),
+      (parseInt(d.chars) || 0).toLocaleString('pt-BR')
+    ];
+    if (showTime) {
+      row.splice(3, 0, d.ratio.toFixed(2) + 'x');
+      row.push(window.ExcelParser.secondsToHMS(d.time));
+    }
+    return row;
+  });
+
+  doc.autoTable({
+    startY: 102,
+    head: tableHead,
+    body: tableBody,
     styles: { 
       fontSize: 7.5, 
       textColor: [203, 213, 225], 
@@ -457,7 +548,7 @@ function exportUnifiedPDF(title, dataset, summary) {
       0: { cellWidth: 32, fontStyle: 'bold' },
       1: { cellWidth: 20, halign: 'center' },
       2: { cellWidth: 'auto' }, 
-      3: { cellWidth: 22, halign: 'center' }, 
+      3: { cellWidth: 24, halign: showTime ? 'center' : 'right' }, 
       4: { cellWidth: 24, halign: 'right' },
       5: { cellWidth: 24, halign: 'center' }
     },
@@ -477,15 +568,23 @@ function exportUnifiedPDF(title, dataset, summary) {
   });
 
   // Balanced Footer
+  const footerX = 15;
   const finalY = doc.lastAutoTable.finalY + 15;
-  
-  if (finalY < H - 15) {
+  const footerLines = [
+    'Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'),
+    'desenvolvido por Rafael Godoy'
+  ];
+
+  const renderFooter = (y) => {
       doc.setFontSize(7); doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'italic');
-      doc.text('Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'), 15, finalY);
+      doc.text(footerLines, footerX, y);
+  };
+
+  if (finalY < H - 20) {
+      renderFooter(finalY);
   } else {
       doc.addPage();
-      doc.setFontSize(7); doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'italic');
-      doc.text('Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'), 15, 15);
+      renderFooter(15);
   }
 
   let filenameBase = 'Overview';
@@ -498,13 +597,24 @@ function exportUnifiedPDF(title, dataset, summary) {
   doc.save(filenameBase + '_' + new Date().toISOString().slice(0,10) + '.pdf');
 }
 
-function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, summary) {
+function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, summary, showTime = true) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
 
-  // Override addPage to ensure dark background on all new pages created by autoTable
+  // FAIL-SAFE: Intercept all text drawing to remove ALL ampersands and bad spacing
+  const oldText = doc.text;
+  doc.text = function(text, x, y, options) {
+    if (typeof text === 'string') {
+        text = toSafePDF(text);
+    } else if (Array.isArray(text)) {
+        text = text.map(t => typeof t === 'string' ? toSafePDF(t) : t);
+    }
+    return oldText.call(this, text, x, y, options);
+  };
+
+  // Override addPage to ensure dark background
   const originalAddPage = doc.addPage;
   doc.addPage = function() {
     originalAddPage.apply(this, arguments);
@@ -533,37 +643,53 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
   // Client Detail
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-  doc.text(clientName.toUpperCase(), 15, 38);
+  doc.text(toSafePDF(clientName).toUpperCase(), 15, 38);
   
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-  doc.text(monthLabel + (monthPeriod ? ' • ' + monthPeriod : ''), 15, 44);
+  
+  // Build safe sub-header: month label and period are each sanitized independently
+  const safePeriod = toSafePDF(monthPeriod || '');
+  const headerSubText = toSafePDF(monthLabel) + (safePeriod ? ' | ' + safePeriod : '');
+  doc.text(headerSubText, 15, 44);
   
   // KPI Section Marker
   doc.setTextColor(245, 158, 11);
   doc.setFontSize(8); doc.setFont('helvetica', 'bold');
   doc.text('PERFORMANCE SNAPSHOT', 15, 62);
 
-  // KPI Cards
-  const cardW = (W - 40) / 3;
+  // KPI Cards logic
+  const activeCardsCount = showTime ? 3 : 2;
+  const cardW = (W - 40) / activeCardsCount;
   const cardY = 66;
   const cardH = 26;
   const cardGap = 5;
 
   const drawKPICard = (x, title, value, unit, color) => {
-    doc.setFillColor(15, 23, 42); // slate-900 (solid)
+    doc.setFillColor(15, 23, 42); 
     doc.roundedRect(x, cardY, cardW, cardH, 3, 3, 'F');
     
     doc.setTextColor(148, 163, 184);
     doc.setFontSize(7); doc.setFont('helvetica', 'normal');
     doc.text(title.toUpperCase(), x + 6, cardY + 8);
     
+    // Split into lines if there's a newline
+    const lines = String(value).split('\n');
+    const mainValue = lines[0];
+    const subValue = lines[1] || '';
+    
     doc.setTextColor(color[0], color[1], color[2]);
     doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    doc.text(value, x + 6, cardY + 18);
+    doc.text(mainValue, x + 6, cardY + 18);
     
-    if (unit) {
-      const valW = doc.getTextWidth(value); // Calc width before changing font size
+    if (subValue) {
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(subValue, x + 6, cardY + 23);
+    }
+    
+    if (unit && !subValue) {
+      const valW = doc.getTextWidth(mainValue);
       doc.setFontSize(7); doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 116, 139);
       doc.text(unit, x + 8 + valW, cardY + 18);
@@ -572,22 +698,36 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
 
   drawKPICard(15, 'Faturamento Estimado', summary.earnings || 'R$ 0,00', '', [16, 185, 129]);
   drawKPICard(15 + cardW + cardGap, 'Vídeos Entregues', summary.count || '0', 'TOTAL', [255, 255, 255]);
-  drawKPICard(15 + (cardW + cardGap) * 2, 'Esforço Acumulado', (summary.hours || '00:00:00').split('(')[0].trim(), '', [245, 158, 11]);
+  if (showTime) {
+    drawKPICard(15 + (cardW + cardGap) * 2, 'Esforço Acumulado', (summary.hours || '00:00:00').split('(')[0].trim(), '', [245, 158, 11]);
+  }
 
   // Video Listing Table
+  const outrosVideos = videos.filter(v => v.tipo_item === 'outros' && v.feito);
+  const tableHead = showTime 
+    ? [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'CHARS', 'TEMPO', 'RATIO']]
+    : [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'CHARS']];
+
   doc.autoTable({
     startY: 102,
-    head: [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'CHARS', 'TEMPO', 'RATIO']],
-    body: videos.map(v => {
-      const ratio = (v.tempo > 0 && v.tempo_fazer > 0) ? (v.tempo_fazer / v.tempo).toFixed(1) + 'x' : '–';
-      return [
-        v.feito ? 'CONCLUIDO' : 'PENDENTE',
-        (v.titulo || '–').toUpperCase(),
+    head: tableHead,
+    body: videos.filter(v => v.tipo_item !== 'outros').map(v => {
+      let status;
+      if (!v.feito)                { status = 'PENDENTE'; }
+      else if (v.cobrado === false) { status = 'ENTREGUE'; }
+      else                         { status = 'COBRADO'; }
+      const row = [
+        status,
+        toSafePDF(v.titulo || '–').toUpperCase(),
         v.idiomas || 7,
-        (parseInt(v.chars) || 0).toLocaleString('pt-BR'),
-        window.ExcelParser.secondsToHMS(v.tempo),
-        ratio
+        toSafePDF((parseInt(v.chars) || 0).toLocaleString('pt-BR'))
       ];
+      if (showTime) {
+        const ratio = (v.tempo > 0 && v.tempo_fazer > 0) ? (v.tempo_fazer / v.tempo).toFixed(1) + 'x' : '–';
+        row.push(toSafePDF(window.ExcelParser.secondsToHMS(v.tempo)));
+        row.push(toSafePDF(ratio));
+      }
+      return row;
     }),
     styles: { 
       fontSize: 7.5, 
@@ -608,7 +748,7 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
       cellPadding: 4
     },
     alternateRowStyles: { 
-      fillColor: [15, 23, 42] // solid slate-900 instead of RGBA
+      fillColor: [15, 23, 42]
     },
     columnStyles: {
       0: { cellWidth: 26, fontStyle: 'bold' },
@@ -627,23 +767,61 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
     },
     didParseCell: function(data) {
         if (data.section === 'body' && data.column.index === 0) {
-            if (data.cell.raw === 'CONCLUIDO') data.cell.styles.textColor = [16, 185, 129];
+            if (data.cell.raw === 'COBRADO')   data.cell.styles.textColor = [16, 185, 129];
+            else if (data.cell.raw === 'ENTREGUE') data.cell.styles.textColor = [96, 165, 250];
             else data.cell.styles.textColor = [239, 68, 68];
         }
     },
     margin: { left: 15, right: 15 }
   });
 
+  // Seção de Tarefas Avulsas (Outros)
+  if (outrosVideos.length > 0) {
+    const outrosStartY = doc.lastAutoTable.finalY + 10;
+    doc.setTextColor(16, 185, 129);
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+    doc.text('TAREFAS AVULSAS', 15, outrosStartY + 5);
+
+    doc.autoTable({
+      startY: outrosStartY + 8,
+      head: [['DESCRICAO', 'VALOR (R$)']],
+      body: outrosVideos.map(v => [
+        toSafePDF(v.titulo || '–').toUpperCase(),
+        (parseFloat(v.valor_individual) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+      ]),
+      styles: { fontSize: 7.5, textColor: [203, 213, 225], fillColor: [10, 18, 30], cellPadding: 3, font: 'helvetica', lineWidth: 0, minCellHeight: 9, valign: 'middle' },
+      headStyles: { fillColor: [5, 46, 22], textColor: [16, 185, 129], fontStyle: 'bold', fontSize: 7, halign: 'left', cellPadding: 3 },
+      alternateRowStyles: { fillColor: [10, 30, 20] },
+      columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 32, halign: 'right', textColor: [16, 185, 129], fontStyle: 'bold' } },
+      margin: { left: 15, right: 15 }
+    });
+
+    const totalOutros = outrosVideos.reduce((s, v) => s + (parseFloat(v.valor_individual) || 0), 0);
+    const totY = doc.lastAutoTable.finalY + 5;
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 185, 129);
+    doc.text('Total Tarefas Avulsas: R$ ' + totalOutros.toLocaleString('pt-BR', { minimumFractionDigits: 2 }), W - 15, totY, { align: 'right' });
+  }
+
   // Balanced Footer
+  const footerX = 15;
   const finalY = doc.lastAutoTable.finalY + 15;
-  
-  if (finalY < H - 15) {
+  // Use array for multi-line support in jsPDF
+  const footerLines = [
+    'Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'),
+    'desenvolvido por Rafael Godoy'
+  ];
+
+  const renderFooter = (y) => {
       doc.setFontSize(7); doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'italic');
-      doc.text('Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'), 15, finalY);
+      // Pass the array to handle line breaks correctly
+      doc.text(footerLines, footerX, y);
+  };
+
+  if (finalY < H - 20) {
+      renderFooter(finalY);
   } else {
       doc.addPage();
-      doc.setFontSize(7); doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'italic');
-      doc.text('Este documento foi gerado pelo sistema DubAnalytics Premium v3.0 em ' + new Date().toLocaleDateString('pt-BR'), 15, 15);
+      renderFooter(15);
   }
 
   doc.save('MonthlyReport_' + clientName.replace(/\s+/g, '_') + '_' + monthLabel.replace(/\s+/g, '_') + '.pdf');

@@ -46,9 +46,12 @@ window.boot = async function() {
   renderYearSelector();
   setupEventListeners();
   
-  // Privacy Mode Init
+  // Privacy & Settings Init
   State.privacyMode = localStorage.getItem('dub_privacy_mode') === '1';
   applyPrivacyMode();
+
+  var savedRate = localStorage.getItem('dub_target_hourly_rate');
+  if (savedRate) State.targetHourlyRate = parseFloat(savedRate) || 60;
 
   updateUserInfo();
 };
@@ -497,6 +500,7 @@ function renderBenchmarks() {
 
 window.updateTargetRate = function(val) {
   State.targetHourlyRate = parseFloat(val) || 60;
+  localStorage.setItem('dub_target_hourly_rate', State.targetHourlyRate);
   renderBenchmarks();
 };
 
@@ -592,8 +596,8 @@ window.openPackageDetailsModal = function() {
 function renderMonthDetails() {
   var m = State.selectedMonth;
   if (!m) return;
-  document.getElementById('month-label').innerText = m.label;
-  document.getElementById('month-period').innerText = m.periodo || '';
+  document.getElementById('month-label').innerText = (m.label || '').replace(/&/g, '').trim();
+  document.getElementById('month-period').innerText = (m.periodo || '').replace(/&/g, '').trim();
   
   var ppvVal = parseFloat(m.price_per_video);
   document.getElementById('cfg-ppv').value = isNaN(ppvVal) ? 40 : ppvVal;
@@ -611,23 +615,35 @@ function renderMonthDetails() {
 
   var mVideos = State.videos.filter(function(v) { return v.monthId === m.id; });
   mVideos.sort(function(a, b) { return (a.rowIndex || 0) - (b.rowIndex || 0); });
-  var done = mVideos.filter(function(v) { return v.feito; }).length;
-  
+
+  // Separar vídeos normais de itens "Outros"
+  var videoItems = mVideos.filter(function(v) { return v.tipo_item !== 'outros'; });
+  var outrosItems = mVideos.filter(function(v) { return v.tipo_item === 'outros'; });
+  var isSimples = State.selectedClient && State.selectedClient.simples;
+
+  // cobrado: padrão true para vídeos antigos que não têm o campo (retrocompatível)
+  function isCobrado(v) { return v.feito && v.cobrado !== false; }
+  function isEntregue(v) { return v.feito && v.cobrado === false; }
+
+  var cobrados = videoItems.filter(isCobrado).length;
+  var entregues = videoItems.filter(isEntregue).length; // feito mas não cobrado
+  var totalVids  = videoItems.length;
+
   var totalWorkSeconds = 0;
   var totalVideoSeconds = 0;
-  mVideos.forEach(v => { 
-    if (v.feito) { 
+  mVideos.forEach(function(v) {
+    if (v.feito) {
       var tFazer = parseFloat(v.tempo_fazer) || 0;
       if (tFazer > 0) {
-        totalWorkSeconds += tFazer; 
+        totalWorkSeconds += tFazer;
         totalVideoSeconds += (parseFloat(v.tempo) || 0);
       }
     }
   });
 
-  // Compensation Logic (Cumulative Balance)
+  // Compensation Logic — usa cobrado (não só feito)
   var isCompensated = m.compensate === true;
-  var clientMonths = getClientMonthsSorted(State.selectedClient.id).reverse(); // Oldest first
+  var clientMonths = getClientMonthsSorted(State.selectedClient.id).reverse();
   var cumDone = 0;
   var cumBase = 0;
   var prevExtraPaid = 0;
@@ -636,34 +652,17 @@ function renderMonthDetails() {
 
   for (var i = 0; i < clientMonths.length; i++) {
     var cm = clientMonths[i];
-    var cmVideos = State.videos.filter(function(v) { return v.monthId === cm.id && v.feito; });
-    var cmDone = cmVideos.length;
+    var cmCobrados = State.videos.filter(function(v) { return v.monthId === cm.id && isCobrado(v) && v.tipo_item !== 'outros'; }).length;
     var cmBase = parseFloat(cm.base_videos) || 0;
-
-    // We only accumulate if the month ITSELF is marked as compensated
-    // OR if we want to track the running balance strictly. 
-    // The user said "not all clients have it", so usually it's a per-client/per-contract thing.
     if (cm.compensate) {
-      cumDone += cmDone;
+      cumDone += cmCobrados;
       cumBase += cmBase;
-      
       var cumOverage = Math.max(0, cumDone - cumBase);
       var extraThisMonth = Math.max(0, cumOverage - prevExtraPaid);
-
-      if (cm.id === m.id) {
-         currentMonthExtra = extraThisMonth;
-         currentBalance = cumDone - cumBase;
-         break;
-      }
+      if (cm.id === m.id) { currentMonthExtra = extraThisMonth; currentBalance = cumDone - cumBase; break; }
       prevExtraPaid += extraThisMonth;
     } else {
-      // Simple logic for this month
-      if (cm.id === m.id) {
-        currentMonthExtra = Math.max(0, cmDone - cmBase);
-        currentBalance = cmDone - cmBase; 
-        break;
-      }
-      // If previous months were not compensated, they don't affect future balances
+      if (cm.id === m.id) { currentMonthExtra = Math.max(0, cmCobrados - cmBase); currentBalance = cmCobrados - cmBase; break; }
     }
   }
 
@@ -673,58 +672,138 @@ function renderMonthDetails() {
   var ppv = parseFloat(m.price_per_video); if (isNaN(ppv)) ppv = 40;
   var basePay = parseFloat(m.base_payment); if (isNaN(basePay)) basePay = 500;
   var bonus = parseFloat(m.bonus); if (isNaN(bonus)) bonus = 0;
-  var earnings = basePay + (currentMonthExtra * ppv) + bonus;
 
-  document.getElementById('m-stat-done').innerText = done + '/' + mVideos.length;
-  
+  // Soma ganhos de itens "Outros" cobrados (feito=true, cobrado!=false)
+  var outrosEarnings = outrosItems
+    .filter(isCobrado)
+    .reduce(function(s, v) { return s + (parseFloat(v.valor_individual) || 0); }, 0);
+
+  var earnings = basePay + (currentMonthExtra * ppv) + bonus + outrosEarnings;
+
+  // Stat: COBRADOS / ENTREGUES / TOTAL
+  var statDoneEl = document.getElementById('m-stat-done');
+  statDoneEl.innerHTML = cobrados + '<span style="color:var(--text-dim);font-size:13px">/' + totalVids + '</span>' +
+    (entregues > 0 ? '\n<div style="font-size:9px; color:#60a5fa; margin-top:2px">+' + entregues + ' entregue' + (entregues > 1 ? 's' : '') + ' s/ cobrança</div>' : '');
+  var statDoneCard = statDoneEl.closest('.card');
+  if (statDoneCard) {
+    statDoneCard.querySelector('small').innerText = 'COBRADOS / TOTAL';
+    if (entregues > 0) statDoneCard.classList.add('card-long-text');
+    else statDoneCard.classList.remove('card-long-text');
+  }
+
   var balEl = document.getElementById('m-stat-balance');
   balEl.innerText = (currentBalance > 0 ? '+' : '') + currentBalance;
   balEl.className = 'stat-value ' + (currentBalance < 0 ? 'text-danger' : currentBalance > 0 ? 'text-success' : '');
 
   document.getElementById('m-stat-pay').innerText = 'R$ ' + earnings.toLocaleString('pt-BR', {minimumFractionDigits: 2});
   var monthDays = (totalWorkSeconds / 86400).toFixed(1);
-  document.getElementById('m-stat-hours').innerHTML = ExcelParser.secondsToHMS(totalWorkSeconds) + '<span style="font-size:12px; font-weight:normal; color:var(--text-dim); margin-left:8px">(~' + monthDays + ' dias)</span>';
+  document.getElementById('m-stat-hours').innerHTML = ExcelParser.secondsToHMS(totalWorkSeconds) + '\n<span style="font-size:12px; font-weight:normal; color:var(--text-dim); margin-left:8px">(~' + monthDays + ' dias)</span>';
   document.getElementById('m-stat-ratio').innerText = (totalVideoSeconds > 0 ? (totalWorkSeconds / totalVideoSeconds).toFixed(2) : '0.0') + 'x';
-  
+
+  var statHoursCard = document.getElementById('m-stat-hours').closest('.card');
+  if (statHoursCard) statHoursCard.classList.add('card-long-text');
+
   var perHour = totalWorkSeconds > 0 ? earnings / (totalWorkSeconds / 3600) : 0;
   document.getElementById('m-stat-per-hour').innerText = 'R$ ' + perHour.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 
+  // Atualiza cabeçalho da tabela dinamicamente (simples vs full)
+  var thead = document.querySelector('#video-table thead tr');
+  if (thead) {
+    if (isSimples) {
+      thead.innerHTML = '<th>Status</th><th style="width:100%">Título</th><th>Ações</th>';
+    } else {
+      thead.innerHTML = '<th>Status</th><th>Transc.</th><th>Título</th><th>Idiomas</th><th>Chars</th><th>Ratio</th><th>Tempo</th><th>Ações</th>';
+    }
+  }
+
   var tbody = document.getElementById('video-tbody');
-  tbody.innerHTML = mVideos.map(function(v) {
+
+  function renderVideoRow(v) {
     try {
-      var ratio = (v.tempo > 0 && parseFloat(v.tempo_fazer) > 0) ? (parseFloat(v.tempo_fazer) / v.tempo).toFixed(1) : '–';
+      var isOutros = v.tipo_item === 'outros';
+      var ratio = (!isSimples && !isOutros && v.tempo > 0 && parseFloat(v.tempo_fazer) > 0) ? (parseFloat(v.tempo_fazer) / v.tempo).toFixed(1) : '\u2013';
       var isBenchmark = v.isTest || false;
-      var rowClass = isBenchmark ? 'style="background:rgba(99,102,241,0.05)"' : '';
-      
-      return '<tr ' + rowClass + '>' +
-        '<td><button class="badge ' + (v.feito ? 'bg-done' : 'bg-todo') + '" onclick="toggleVideoField(\'' + v.id + '\', \'feito\')">' + (v.feito ? '✓ Feito' : '✗ Pend.') + '</button></td>' +
-        '<td><button class="badge ' + (v.transcrito ? 'bg-info' : '') + '" onclick="toggleVideoField(\'' + v.id + '\', \'transcrito\')">' + (v.transcrito ? '✎ Sim' : '— Não') + '</button></td>' +
-        '<td>' + 
-          '<div style="font-weight:600">' + 
-             (v.link ? '<a href="' + v.link + '" target="_blank" style="color:var(--accent); text-decoration:none" title="Abrir link">' + (v.titulo || '–') + ' 🔗</a>' : (v.titulo || '–')) + 
-             (isBenchmark ? ' <span class="badge bg-todo" style="font-size:9px">TESTE</span>' : '') + 
-          '</div>' +
+
+      if (isOutros) {
+        var valorFmt = (parseFloat(v.valor_individual) || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2});
+        var outrosCols = isSimples
+          ? '<td><div style="font-weight:600">' + (v.titulo || '\u2013') + '</div><div style="font-size:10px; color:#10b981">Tarefa avulsa \u2022 R$ ' + valorFmt + (v.comentario ? ' \u2022 ' + v.comentario : '') + '</div></td>'
+          : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="4"><div style="font-weight:600">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
+        var feitoCls = v.feito ? 'bg-done' : 'bg-todo';
+        var feitoLbl = v.feito ? '\u2713 Feito' : '\u2717 Pend.';
+        return '<tr style="background:rgba(16,185,129,0.05); border-left:3px solid #10b981">' +
+          '<td><button class="badge ' + feitoCls + '" onclick="toggleVideoField(\'' + v.id + '\', \'feito\')">' + feitoLbl + '</button></td>' +
+          outrosCols +
+          '<td><button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> <button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button></td>' +
+          '</tr>';
+      }
+
+      // Status de 3 estados
+      var stCls, stLabel, stTitle;
+      if (!v.feito)                  { stCls = 'bg-todo'; stLabel = '\u2717 Pendente';  stTitle = 'Clique: marcar Entregue'; }
+      else if (v.cobrado === false)   { stCls = 'bg-info'; stLabel = '\u2713 Entregue';  stTitle = 'Clique: marcar Cobrado'; }
+      else                           { stCls = 'bg-done'; stLabel = '\ud83d\udcb0 Cobrado';  stTitle = 'Clique: desmarcar'; }
+
+      var rowBg    = (v.feito && v.cobrado === false) ? 'rgba(96,165,250,0.05)' : (isBenchmark ? 'rgba(99,102,241,0.05)' : 'transparent');
+      var rowBdr   = (v.feito && v.cobrado === false) ? '3px solid #60a5fa' : 'none';
+      var rowStyle = 'style="background:' + rowBg + '; border-left:' + rowBdr + '"';
+      var statusBtn = '<button class="badge ' + stCls + '" onclick="cycleVideoStatus(\'' + v.id + '\')" title="' + stTitle + '">' + stLabel + '</button>';
+
+      var titleDiv = '<div style="font-weight:600">' +
+        (v.link ? '<a href="' + v.link + '" target="_blank" style="color:var(--accent); text-decoration:none">' + (v.titulo || '\u2013') + ' \ud83d\udd17</a>' : (v.titulo || '\u2013')) +
+        (isBenchmark ? ' <span class="badge bg-todo" style="font-size:9px">TESTE</span>' : '') +
+        '</div>';
+
+      var actions = '<td>' +
+        (v.link ? '<a href="' + v.link + '" target="_blank" class="btn-ghost" style="color:var(--accent);text-decoration:none;padding:5px;margin-right:5px" title="Abrir V\u00eddeo">\ud83d\udd17</a>' : '') +
+        '<button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> ' +
+        '<button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button>' +
+        '</td>';
+
+      if (isSimples) {
+        var sub = v.comentario ? '<div style="font-size:10px; color:var(--text-dim)">' + v.comentario + '</div>' : '';
+        return '<tr ' + rowStyle + '><td>' + statusBtn + '</td><td>' + titleDiv + sub + '</td>' + actions + '</tr>';
+      }
+
+      return '<tr ' + rowStyle + '>' +
+        '<td>' + statusBtn + '</td>' +
+        '<td><button class="badge ' + (v.transcrito ? 'bg-info' : '') + '" onclick="toggleVideoField(\'' + v.id + '\', \'transcrito\')">' + (v.transcrito ? '\u270e Sim' : '\u2014 N\u00e3o') + '</button></td>' +
+        '<td>' + titleDiv +
           '<div style="display:flex; gap:8px">' +
-             '<small style="color:var(--text-dim); font-size:10px">' + (Analytics.detectTopic ? Analytics.detectTopic(v.titulo) : 'OUTROS') + '</small>' +
-             (v.palavras ? '<small style="color:var(--text-dim); font-size:10px">| ' + v.palavras + ' words</small>' : '') +
-             (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">💬</span>' : '') +
+            '<small style="color:var(--text-dim); font-size:10px">' + (Analytics.detectTopic ? Analytics.detectTopic(v.titulo) : '') + '</small>' +
+            (v.palavras ? '<small style="color:var(--text-dim); font-size:10px">| ' + v.palavras + ' words</small>' : '') +
+            (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') +
           '</div>' +
         '</td>' +
         '<td class="text-accent">' + v.idiomas + '</td>' +
         '<td>' + (parseInt(v.chars) || 0).toLocaleString('pt-BR') + '</td>' +
-        '<td style="font-weight:600; color:' + (ratio > 8 ? 'var(--danger)' : ratio > 6 ? 'var(--accent)' : '#10b981') + '">' + (ratio !== '–' ? ratio + 'x' : '–') + '</td>' +
+        '<td style="font-weight:600; color:' + (ratio > 8 ? 'var(--danger)' : ratio > 6 ? 'var(--accent)' : '#10b981') + '">' + (ratio !== '\u2013' ? ratio + 'x' : '\u2013') + '</td>' +
         '<td>' + ExcelParser.secondsToHMS(v.tempo) + '</td>' +
-        '<td>' +
-          (v.link ? '<a href="' + v.link + '" target="_blank" class="btn-ghost" style="color:var(--accent); text-decoration:none; padding:5px; margin-right:5px" title="Abrir Vídeo">🔗</a>' : '') +
-          '<button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">✎</button> ' +
-          '<button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">✕</button>' +
-        '</td>' +
+        actions +
       '</tr>';
     } catch (e) {
-      console.error("Erro ao renderizar linha de video:", e, v);
+      console.error('Erro ao renderizar linha de video:', e, v);
       return '<tr><td colspan="8" style="color:var(--danger)">Erro ao carregar vídeo: ' + v.titulo + '</td></tr>';
     }
-  }).join('');
+  }
+
+  var rows = mVideos.map(renderVideoRow);
+
+  // Separador visual se houver itens "Outros"
+  if (outrosItems.length > 0 && videoItems.length > 0) {
+    var outrosEarnFmt = outrosEarnings.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+    var separatorIdx = videoItems.length; // posição após os vídeos normais (já ordenados juntos via mVideos sort)
+    // Inserir após o último vídeo normal
+    var insertAt = mVideos.reduce(function(lastNormalIdx, v, idx) {
+      return v.tipo_item !== 'outros' ? idx : lastNormalIdx;
+    }, -1);
+    var separator = '<tr><td colspan="8" style="padding:4px 10px; background:rgba(16,185,129,0.08); border-top:1px solid rgba(16,185,129,0.3); border-bottom:1px solid rgba(16,185,129,0.3)"><span style="font-size:10px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:0.08em">📋 Tarefas Avulsas (+ R$ ' + outrosEarnFmt + ')</span></td></tr>';
+    if (insertAt >= 0) {
+      rows.splice(insertAt + 1, 0, separator);
+    }
+  }
+
+  tbody.innerHTML = rows.join('');
 }
 
 /* ========== DATA MUTATIONS (V3.0 Extended) ========== */
@@ -732,6 +811,24 @@ window.toggleVideoField = async function(videoId, field) {
   var v = State.videos.find(function(x) { return x.id === videoId; });
   if (!v) return;
   v[field] = !v[field];
+  await DB.put('videos', v);
+  renderMonthDetails();
+};
+
+// Cicla entre: Pendente → Entregue (não cobrado) → Cobrado → Pendente
+window.cycleVideoStatus = async function(videoId) {
+  var v = State.videos.find(function(x) { return x.id === videoId; });
+  if (!v) return;
+  if (!v.feito) {
+    // Pendente → Entregue s/ cobrança
+    v.feito = true; v.cobrado = false;
+  } else if (v.cobrado === false) {
+    // Entregue → Cobrado
+    v.cobrado = true;
+  } else {
+    // Cobrado → Pendente
+    v.feito = false; v.cobrado = false;
+  }
   await DB.put('videos', v);
   renderMonthDetails();
 };
@@ -778,6 +875,13 @@ window.openClientModal = function(existingId) {
   showModal(
     '<h2>👤 ' + (c ? 'Editar' : 'Novo') + ' Cliente</h2>' +
     '<div class="form-group"><label>Nome do Cliente</label><input type="text" id="new-client-name" value="' + (c ? c.name : '') + '" placeholder="Ex: SanInPlay"></div>' +
+    '<div style="background:rgba(99,102,241,0.06); border:1px solid rgba(99,102,241,0.2); border-radius:10px; padding:12px; margin-bottom:15px; display:flex; align-items:flex-start; gap:10px">' +
+      '<input type="checkbox" id="new-client-simples" ' + (c && c.simples ? 'checked' : '') + ' style="width:16px; height:16px; margin-top:2px; cursor:pointer">' +
+      '<div>' +
+        '<label for="new-client-simples" style="font-size:11px; font-weight:700; color:#a5b4fc; cursor:pointer; text-transform:uppercase; letter-spacing:0.05em; margin:0">Modo Simples</label>' +
+        '<div style="font-size:10px; color:var(--text-dim); margin-top:2px">Oculta campos de Chars, Idiomas, Ratio e Transcrição. Ideal para clientes de vídeo/redes sociais.</div>' +
+      '</div>' +
+    '</div>' +
     '<div class="modal-footer">' +
        '<button class="btn-ghost" onclick="closeModal()">Cancelar</button>' +
        '<button class="btn-accent" onclick="saveClient(\'' + (existingId || '') + '\')">Salvar Cliente</button>' +
@@ -788,12 +892,19 @@ window.openClientModal = function(existingId) {
 window.saveClient = async function(existingId) {
   var name = document.getElementById('new-client-name').value.trim();
   if (!name) return;
+  var simples = document.getElementById('new-client-simples') ? document.getElementById('new-client-simples').checked : false;
   if (existingId) {
     var client = State.clients.find(function(c) { return c.id === existingId; });
-    if (client) { client.name = name; await DB.put('clients', client); updateSidebar(); if (State.selectedClient && State.selectedClient.id === existingId) { State.selectedClient = client; renderClientWorkspace(); } }
+    if (client) {
+      client.name = name;
+      client.simples = simples;
+      await DB.put('clients', client);
+      updateSidebar();
+      if (State.selectedClient && State.selectedClient.id === existingId) { State.selectedClient = client; renderClientWorkspace(); }
+    }
   } else {
     var id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
-    var newClient = { id: id, name: name, active: true };
+    var newClient = { id: id, name: name, active: true, simples: simples };
     await DB.put('clients', newClient);
     State.clients.push(newClient); updateSidebar(); selectClient(id);
   }
@@ -838,45 +949,108 @@ window.saveMonthModal = async function(existingId) {
 
 window.openVideoModal = function(videoId) {
   var v = videoId ? State.videos.find(function(x) { return x.id === videoId; }) : null;
+  var tipoAtual = v ? (v.tipo_item || 'video') : 'video';
+  var isOutros = tipoAtual === 'outros';
+
+  var videoFieldsStyle = isOutros ? 'display:none' : '';
+  var outrosFieldsStyle = isOutros ? '' : 'display:none';
+
   showModal(
-    '<h2>🚀 ' + (v ? 'Editar' : 'Novo') + ' Vídeo</h2>' +
-    '<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px">' +
-      '<div class="form-group" style="grid-column: span 2"><label>Título da Obra</label><input type="text" id="v-title" value="' + (v ? v.titulo : '') + '" placeholder="Ex: Fuga no GTA 5..."></div>' +
-      '<div class="form-group" style="grid-column: span 2"><label>Link do Vídeo (🔗)</label><input type="text" id="v-link" value="' + (v && v.link ? v.link : '') + '" placeholder="https://youtube.com/..."></div>' +
-      
-      '<div class="form-group"><label>Idiomas</label><input type="number" id="v-lang" value="' + (v ? v.idiomas : 7) + '"></div>' +
-      '<div class="form-group"><label>Quantidade de Palavras</label><input type="number" id="v-palavras" value="' + (v && v.palavras ? v.palavras : 0) + '"></div>' +
-      
-      '<div class="form-group"><label>Total de Chars</label><input type="number" id="v-chars" value="' + (v ? v.chars : 0) + '"></div>' +
-      '<div class="form-group"><label>Duração do Vídeo</label><input type="text" id="v-time" value="' + ExcelParser.secondsToHMS(v ? v.tempo : 0) + '" placeholder="00:00:00"></div>' +
-      
-      '<div class="form-group" style="grid-column: span 2"><label>Tempo de Trabalho (Esforço)</label><input type="text" id="v-work" value="' + ExcelParser.secondsToHMS(v ? v.tempo_fazer : 0) + '" placeholder="00:00:00"></div>' +
-      
-      '<div style="grid-column: span 2; background: rgba(245, 158, 11, 0.05); border: 1px dashed var(--accent); padding: 12px; border-radius: 10px; display: flex; align-items: center; gap: 10px">' +
-        '<input type="checkbox" id="v-is-test" ' + (v && v.isTest ? 'checked' : '') + ' style="width:16px; height:16px; cursor:pointer">' + 
-        '<label for="v-is-test" style="font-size: 11px; font-weight: 700; color: var(--accent); cursor: pointer; text-transform: uppercase; margin:0">Marcar como Vídeo de Teste (Benchmark)</label>' +
+    '<h2>🚀 ' + (v ? 'Editar' : 'Novo') + ' Item</h2>' +
+
+    // Seletor de tipo
+    '<div class="form-group" style="grid-column: span 2; margin-bottom:15px">' +
+      '<label style="display:block; margin-bottom:6px">Tipo de Item</label>' +
+      '<div style="display:flex; gap:8px">' +
+        '<button id="btn-tipo-video" onclick="switchTipoItem(\'video\')" class="btn-' + (isOutros ? 'ghost' : 'accent') + '" style="flex:1; padding:10px">🎬 Vídeo</button>' +
+        '<button id="btn-tipo-outros" onclick="switchTipoItem(\'outros\')" class="btn-' + (isOutros ? 'accent' : 'ghost') + '" style="flex:1; padding:10px; ' + (isOutros ? 'background:#10b981; border-color:#10b981' : '') + '">📋 Outros / Tarefa</button>' +
       '</div>' +
-      '<div class="form-group" style="grid-column: span 2"><label>Comentários / Notas</label><textarea id="v-comentario" style="height: 80px; resize: none" placeholder="Observações sobre este vídeo...">' + (v && v.comentario ? v.comentario : '') + '</textarea></div>' +
     '</div>' +
+
+    '<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px">' +
+      '<div class="form-group" style="grid-column: span 2"><label>Título / Descrição</label><input type="text" id="v-title" value="' + (v ? v.titulo : '') + '" placeholder="Ex: Fuga no GTA 5 / Revisão de roteiro..."></div>' +
+
+      // campos só de vídeo
+      '<div id="video-fields" style="display:contents; ' + videoFieldsStyle + '">' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Link do Vídeo (🔗)</label><input type="text" id="v-link" value="' + (v && v.link ? v.link : '') + '" placeholder="https://youtube.com/..."></div>' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Idiomas</label><input type="number" id="v-lang" value="' + (v ? v.idiomas : 7) + '"></div>' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Quantidade de Palavras</label><input type="number" id="v-palavras" value="' + (v && v.palavras ? v.palavras : 0) + '"></div>' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Total de Chars</label><input type="number" id="v-chars" value="' + (v ? v.chars : 0) + '"></div>' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Duração do Vídeo</label><input type="text" id="v-time" value="' + ExcelParser.secondsToHMS(v ? v.tempo : 0) + '" placeholder="00:00:00"></div>' +
+        '<div class="form-group" style="grid-column: span 2; ' + videoFieldsStyle + '"><label>Tempo de Trabalho (Esforço)</label><input type="text" id="v-work" value="' + ExcelParser.secondsToHMS(v ? v.tempo_fazer : 0) + '" placeholder="00:00:00"></div>' +
+        '<div style="grid-column: span 2; background: rgba(245, 158, 11, 0.05); border: 1px dashed var(--accent); padding: 12px; border-radius: 10px; display: ' + (isOutros ? 'none' : 'flex') + '; align-items: center; gap: 10px">' +
+          '<input type="checkbox" id="v-is-test" ' + (v && v.isTest ? 'checked' : '') + ' style="width:16px; height:16px; cursor:pointer">' +
+          '<label for="v-is-test" style="font-size: 11px; font-weight: 700; color: var(--accent); cursor: pointer; text-transform: uppercase; margin:0">Marcar como Vídeo de Teste (Benchmark)</label>' +
+        '</div>' +
+      '</div>' +
+
+      // campo de valor individual (só Outros)
+      '<div class="form-group" style="grid-column: span 2; ' + outrosFieldsStyle + '">' +
+        '<label style="color:#10b981">Valor Individual (R$)</label>' +
+        '<input type="number" id="v-valor" step="0.01" value="' + (v && v.valor_individual ? v.valor_individual : '') + '" placeholder="Ex: 80.00" style="border-color:#10b981">' +
+      '</div>' +
+
+      '<div class="form-group" style="grid-column: span 2"><label>Comentários / Notas</label><textarea id="v-comentario" style="height: 60px; resize: none" placeholder="Observações...">' + (v && v.comentario ? v.comentario : '') + '</textarea></div>' +
+    '</div>' +
+
+    '<input type="hidden" id="v-tipo" value="' + tipoAtual + '">' +
     '<div class="modal-footer">' +
       '<button class="btn-ghost" onclick="closeModal()">Cancelar</button>' +
-      '<button class="btn-accent" style="padding: 12px 30px; font-size: 12px" onclick="saveVideoModal(\'' + (videoId || '') + '\')">Salvar Alterações</button>' +
+      '<button class="btn-accent" style="padding: 12px 30px; font-size: 12px" onclick="saveVideoModal(\'' + (videoId || '') + '\')">Salvar</button>' +
     '</div>'
   );
 };
 
+window.switchTipoItem = function(tipo) {
+  document.getElementById('v-tipo').value = tipo;
+  var isOutros = tipo === 'outros';
+  var videoFields = document.querySelectorAll('#modal-box [id^="v-link"], #modal-box [id^="v-lang"], #modal-box [id^="v-palavras"], #modal-box [id^="v-chars"], #modal-box [id^="v-time"], #modal-box [id^="v-work"], #modal-box [id^="v-is-test"]');
+  // Mostrar/ocultar campos via pai .form-group e a div de benchmark
+  var videoFormGroups = document.querySelectorAll('#modal-box .form-group');
+  // Toggle campos de vídeo
+  var vLink = document.getElementById('v-link'); if (vLink) vLink.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vLang = document.getElementById('v-lang'); if (vLang) vLang.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vPalavras = document.getElementById('v-palavras'); if (vPalavras) vPalavras.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vChars = document.getElementById('v-chars'); if (vChars) vChars.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vTime = document.getElementById('v-time'); if (vTime) vTime.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vWork = document.getElementById('v-work'); if (vWork) vWork.closest('.form-group').style.display = isOutros ? 'none' : '';
+  var vIsTest = document.getElementById('v-is-test'); if (vIsTest) vIsTest.closest('div[style*="dashed"]').style.display = isOutros ? 'none' : 'flex';
+  // Toggle campo de valor
+  var vValor = document.getElementById('v-valor'); if (vValor) vValor.closest('.form-group').style.display = isOutros ? '' : 'none';
+  // Botões de tipo
+  var btnVideo = document.getElementById('btn-tipo-video');
+  var btnOutros = document.getElementById('btn-tipo-outros');
+  if (btnVideo) { btnVideo.className = isOutros ? 'btn-ghost' : 'btn-accent'; }
+  if (btnOutros) { btnOutros.className = isOutros ? 'btn-accent' : 'btn-ghost'; btnOutros.style.background = isOutros ? '#10b981' : ''; btnOutros.style.borderColor = isOutros ? '#10b981' : ''; }
+};
+
 window.saveVideoModal = async function(existingId) {
+  var tipoEl = document.getElementById('v-tipo');
+  var tipo = tipoEl ? tipoEl.value : 'video';
+  var isOutros = tipo === 'outros';
+
   var data = {
     titulo: document.getElementById('v-title').value.trim(),
-    link: document.getElementById('v-link').value.trim(),
-    idiomas: parseInt(document.getElementById('v-lang').value) || 7,
-    palavras: parseInt(document.getElementById('v-palavras').value) || 0,
-    chars: parseInt(document.getElementById('v-chars').value) || 0,
-    tempo: ExcelParser.durationToSeconds(document.getElementById('v-time').value),
-    tempo_fazer: ExcelParser.durationToSeconds(document.getElementById('v-work').value),
-    isTest: document.getElementById('v-is-test').checked,
+    tipo_item: tipo,
     comentario: document.getElementById('v-comentario').value.trim()
   };
+
+  if (isOutros) {
+    data.valor_individual = parseFloat(document.getElementById('v-valor').value) || 0;
+    // Limpar campos de vídeo para não poluir
+    data.link = ''; data.idiomas = 0; data.palavras = 0; data.chars = 0;
+    data.tempo = 0; data.tempo_fazer = 0; data.isTest = false;
+  } else {
+    data.link = document.getElementById('v-link').value.trim();
+    data.idiomas = parseInt(document.getElementById('v-lang').value) || 7;
+    data.palavras = parseInt(document.getElementById('v-palavras').value) || 0;
+    data.chars = parseInt(document.getElementById('v-chars').value) || 0;
+    data.tempo = ExcelParser.durationToSeconds(document.getElementById('v-time').value);
+    data.tempo_fazer = ExcelParser.durationToSeconds(document.getElementById('v-work').value);
+    data.isTest = document.getElementById('v-is-test').checked;
+    data.valor_individual = 0;
+  }
+
   if (existingId) {
     var v = State.videos.find(function(x) { return x.id === existingId; });
     Object.assign(v, data); await DB.put('videos', v);
@@ -895,7 +1069,9 @@ window.exportCurrentViewPDF = function() {
   var earnStr = State.activeView === 'general' ? document.getElementById('gen-total-earnings').innerText : document.getElementById('co-earnings').innerText;
   var countStr = State.activeView === 'general' ? document.getElementById('gen-total-videos').innerText : document.getElementById('co-videos').innerText;
   var hourStr = State.activeView === 'general' ? document.getElementById('gen-total-hours').innerText : document.getElementById('co-hours').innerText;
-  Analytics.exportUnifiedPDF(title, agg, { earnings: earnStr, count: countStr, hours: hourStr });
+  
+  var showTime = document.getElementById('pdf-show-time').checked;
+  Analytics.exportUnifiedPDF(title, agg, { earnings: earnStr, count: countStr, hours: hourStr }, showTime);
 };
 
 window.exportMonthPDF = function() {
@@ -909,12 +1085,15 @@ window.exportMonthPDF = function() {
   var countStr = document.getElementById('m-stat-done').innerText;
   var hourStr = document.getElementById('m-stat-hours').innerText;
   
+  var showTime = document.getElementById('pdf-show-time-month').checked;
+  
   Analytics.exportMonthlyReportPDF(
     State.selectedClient.name,
     m.label,
     m.periodo,
     mVideos,
-    { earnings: earnStr, count: countStr, hours: hourStr }
+    { earnings: earnStr, count: countStr, hours: hourStr },
+    showTime
   );
 };
 
@@ -948,11 +1127,28 @@ function importJSONBackup(file) {
     reader.onload = async function(e) {
       try {
         var data = JSON.parse(e.target.result);
+        
+        // Importar Coleções Principais
         if (data.clients) await DB.putBulk('clients', data.clients);
         if (data.videos) await DB.putBulk('videos', data.videos);
         if (data.configs) await DB.putBulk('monthlyConfig', data.configs);
-        // Also support older backups or different structures if they exist
         if (data.monthlyConfigs) await DB.putBulk('monthlyConfig', data.monthlyConfigs);
+        
+        // Importar Configurações Globais (Novidade v3.5)
+        if (data.settings) {
+          if (data.settings.targetHourlyRate !== undefined) {
+            State.targetHourlyRate = parseFloat(data.settings.targetHourlyRate) || 60;
+            localStorage.setItem('dub_target_hourly_rate', State.targetHourlyRate);
+          }
+          if (data.settings.privacyMode !== undefined) {
+            State.privacyMode = !!data.settings.privacyMode;
+            localStorage.setItem('dub_privacy_mode', State.privacyMode ? '1' : '0');
+            applyPrivacyMode();
+          }
+          if (data.settings.filters) {
+            State.filters = Object.assign(State.filters, data.settings.filters);
+          }
+        }
         
         resolve();
       } catch (err) {
@@ -970,8 +1166,13 @@ window.exportBackup = function() {
     clients: State.clients, 
     videos: State.videos, 
     configs: State.monthlyConfigs,
+    settings: {
+      targetHourlyRate: State.targetHourlyRate,
+      privacyMode: State.privacyMode,
+      filters: State.filters
+    },
     exportDate: new Date().toISOString(),
-    version: "3.0"
+    version: "3.5"
   };
   var blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
   var a = document.createElement('a'); 

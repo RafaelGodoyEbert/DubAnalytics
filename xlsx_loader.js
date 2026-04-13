@@ -150,7 +150,7 @@ async function parseExcelFile(file, clientName) {
               rowIndex: idx,
               clientId: clientId,
               monthId: monthId,
-              label: monthLabel,
+              label: String(monthLabel).replace(/&/g, ''),
               titulo: title.trim(),
               feito: done,
               transcrito: transcript,
@@ -168,7 +168,7 @@ async function parseExcelFile(file, clientName) {
         monthlyData.push({
           id: monthId,
           clientId: clientId,
-          label: monthLabel,
+          label: String(monthLabel).replace(/&/g, ''),
           price_per_video: pricePerVideo,
           base_payment: basePay,
           base_videos: baseVideos,

@@ -218,7 +218,20 @@ option {
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
 .card small { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 9px; font-weight: 700; display: block; margin-bottom: 10px; }
-.stat-value { font-size: 26px; font-weight: 700; font-family: var(--font-mono); letter-spacing: -0.02em; }
+.stat-value { 
+  font-size: 26px; 
+  font-weight: 700; 
+  font-family: var(--font-mono); 
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  word-break: break-all;
+}
+
+/* Specific adjustment for cards that might have long text */
+.card-long-text .stat-value {
+  font-size: 20px;
+}
+
 .text-success { color: var(--success); }
 .text-accent { color: var(--accent); }
 .text-danger { color: var(--danger); }
