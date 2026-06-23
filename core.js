@@ -103,9 +103,16 @@ window.loadStateFromDB = async function() {
   State.videos = State.videos.filter(v => validClientIds.has(v.clientId));
   State.monthlyConfigs = State.monthlyConfigs.filter(m => validClientIds.has(m.clientId));
 
-  // Ensure every client has an 'active' property
+  // Ensure every client has all required properties
   State.clients.forEach(c => {
+    c.id = String(c.id);
     if (c.active === undefined) c.active = true;
+    if (c.simples === undefined) c.simples = false;
+    if (c.default_ppv === undefined) c.default_ppv = 40;
+    if (c.default_base === undefined) c.default_base = 500;
+    if (c.default_bvid === undefined) c.default_bvid = 15;
+    if (c.default_bonus === undefined) c.default_bonus = 0;
+    if (c.default_comp === undefined) c.default_comp = false;
   });
   
   window.refreshUI();
