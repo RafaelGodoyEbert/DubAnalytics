@@ -164,14 +164,35 @@ async function syncToCloud(storeName, item) {
     const uid = auth.currentUser.uid;
     const ref = doc(db, 'users', uid, storeName, String(item.id));
     await setDoc(ref, item);
+  } catch (err) {
+    console.error(`Cloud sync failed for ${storeName}/${item.id}:`, err);
+    alert('Erro ao salvar na nuvem: ' + err.message);
   } finally {
     SyncManager.finish(1);
   }
+function sanitizeForFirebase(obj) {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') {
+    if (typeof obj === 'number' && Number.isNaN(obj)) return 0;
+    return obj;
+  }
+  if (Array.isArray(obj)) return obj.map(sanitizeForFirebase);
+  
+  const res = {};
+  for (let k in obj) {
+    if (obj[k] !== undefined) {
+      let val = sanitizeForFirebase(obj[k]);
+      if (val !== undefined && !(typeof val === 'number' && Number.isNaN(val))) {
+        res[k] = val;
+      }
+    }
+  }
+  return res;
 }
 
 async function put(storeName, item, sync = true) {
-  // Fix Firebase rejection: strip undefined values
-  Object.keys(item).forEach(k => { if (item[k] === undefined) delete item[k]; });
+  // Sanitize for Firebase: remove undefined, NaN, etc.
+  item = sanitizeForFirebase(item);
 
   // Atualiza Memória (Memory-First)
   const storeKey = storeName === 'monthlyConfig' ? 'monthlyConfigs' : storeName;
@@ -202,9 +223,7 @@ async function put(storeName, item, sync = true) {
 }
 
 async function putBulk(storeName, items, sync = true) {
-  items.forEach(item => {
-    Object.keys(item).forEach(k => { if (item[k] === undefined) delete item[k]; });
-  });
+  items = items.map(sanitizeForFirebase);
 
   return new Promise((resolve, reject) => {
     if (!localDb) { reject('DB not initialized'); return; }
@@ -247,6 +266,7 @@ async function putBulk(storeName, items, sync = true) {
               console.log(`SYNC: Lote ${currentBatch}/${chunks.length} de "${storeName}" concluído.`);
             } catch (err) {
               console.error(`SYNC: Erro no lote ${currentBatch} de "${storeName}":`, err);
+              alert('Erro de Sincronização Massiva: ' + err.message);
             } finally {
               SyncManager.finish(1);
             }
@@ -277,7 +297,8 @@ async function deleteRecord(storeName, id) {
     try {
       await deleteDoc(ref);
     } catch (err) {
-      console.warn(`Cloud delete failed for ${storeName}/${id}:`, err);
+      console.error(`Cloud delete failed for ${storeName}/${id}:`, err);
+      alert('Erro ao deletar na nuvem: ' + err.message);
     }
   }
 }
