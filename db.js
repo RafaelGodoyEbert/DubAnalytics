@@ -166,7 +166,7 @@ async function syncToCloud(storeName, item) {
     await setDoc(ref, item);
   } catch (err) {
     console.error(`Cloud sync failed for ${storeName}/${item.id}:`, err);
-    alert('Erro ao salvar na nuvem: ' + err.message);
+    alert('Erro ao salvar na nuvem: ' + err.message + '\n\nDados: ' + JSON.stringify(item));
   } finally {
     SyncManager.finish(1);
   }
