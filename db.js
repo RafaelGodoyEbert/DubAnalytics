@@ -170,6 +170,9 @@ async function syncToCloud(storeName, item) {
 }
 
 async function put(storeName, item, sync = true) {
+  // Fix Firebase rejection: strip undefined values
+  Object.keys(item).forEach(k => { if (item[k] === undefined) delete item[k]; });
+
   // Atualiza Memória (Memory-First)
   const storeKey = storeName === 'monthlyConfig' ? 'monthlyConfigs' : storeName;
   if (window.State && window.State[storeKey]) {
@@ -199,6 +202,10 @@ async function put(storeName, item, sync = true) {
 }
 
 async function putBulk(storeName, items, sync = true) {
+  items.forEach(item => {
+    Object.keys(item).forEach(k => { if (item[k] === undefined) delete item[k]; });
+  });
+
   return new Promise((resolve, reject) => {
     if (!localDb) { reject('DB not initialized'); return; }
     const transaction = localDb.transaction([storeName], 'readwrite');

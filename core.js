@@ -874,6 +874,23 @@ window.deleteVideo = async function(id) {
   renderMonthDetails();
 };
 
+window.deleteMonth = async function(id) {
+  if (!confirm('Excluir este mês e todos os vídeos/tarefas vinculadas a ele? Esta ação não pode ser desfeita.')) return;
+  
+  await DB.deleteRecord('monthlyConfig', id);
+  State.monthlyConfigs = State.monthlyConfigs.filter(function(m) { return m.id !== id; });
+  
+  const videosToRemove = State.videos.filter(v => v.monthId === id);
+  for (const v of videosToRemove) {
+    await DB.deleteRecord('videos', v.id);
+  }
+  State.videos = State.videos.filter(function(v) { return v.monthId !== id; });
+  
+  State.selectedMonth = null;
+  State.clientSubView = 'overview';
+  renderClientWorkspace();
+};
+
 /* ========== MODALS ========== */
 window.openClientModal = function(existingId) {
   var c = existingId ? State.clients.find(function(x) { return x.id === existingId; }) : null;

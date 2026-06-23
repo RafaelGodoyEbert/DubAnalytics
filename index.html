@@ -186,6 +186,7 @@
                       <input type="checkbox" id="pdf-show-time-month" onchange="document.getElementById('pdf-show-time-client').checked = this.checked; document.getElementById('pdf-show-time').checked = this.checked;"> 
                       Exportar com Tempo
                     </label>
+                    <button onclick="if(State.selectedMonth) deleteMonth(State.selectedMonth.id)" class="btn-ghost" title="Excluir Mês" style="color:var(--danger)">🗑️</button>
                     <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
                     <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
                     <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
