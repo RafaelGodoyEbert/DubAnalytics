@@ -935,7 +935,7 @@ window.saveClient = async function(existingId) {
     var newClient = { id: id, name: name, active: true, simples: simples };
     Object.assign(newClient, defaults);
     await DB.put('clients', newClient);
-    State.clients.push(newClient); updateSidebar(); selectClient(id);
+    updateSidebar(); selectClient(id);
   }
   closeModal();
 };
@@ -966,7 +966,7 @@ window.saveMonthModal = async function(existingId) {
   if (!nameEl || !yearEl) return;
   
   var label = nameEl.value + ' ' + yearEl.value;
-  var mId = existingId || (State.selectedClient.id + '_' + label.replace(/\s+/g, '_'));
+  var mId = existingId || (State.selectedClient.id + '_' + label.replace(/\s+/g, '_') + '_' + Date.now());
   
   var cDef = State.selectedClient;
   var config = existingId ? State.monthlyConfigs.find(function(x) { return x.id === existingId; }) : { 
@@ -982,7 +982,6 @@ window.saveMonthModal = async function(existingId) {
 
   config.label = label; config.periodo = document.getElementById('m-periodo').value;
   await DB.put('monthlyConfig', config);
-  if (!existingId) State.monthlyConfigs.push(config);
   closeModal(); State.selectedMonth = config; State.clientSubView = 'month'; renderClientWorkspace();
 };
 
@@ -1095,7 +1094,7 @@ window.saveVideoModal = async function(existingId) {
     Object.assign(v, data); await DB.put('videos', v);
   } else {
     var nv = { id: 'v_' + Date.now(), clientId: State.selectedClient.id, monthId: State.selectedMonth.id, label: State.selectedMonth.label, feito: false, transcrito: false, year: parseInt(State.selectedMonth.label.split(' ')[1]) || 2026 };
-    Object.assign(nv, data); State.videos.push(nv); await DB.put('videos', nv);
+    Object.assign(nv, data); await DB.put('videos', nv);
   }
   closeModal(); renderMonthDetails();
 };
