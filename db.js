@@ -162,7 +162,7 @@ async function syncToCloud(storeName, item) {
   SyncManager.start(1);
   try {
     const uid = auth.currentUser.uid;
-    const ref = doc(db, 'users', uid, storeName, item.id);
+    const ref = doc(db, 'users', uid, storeName, String(item.id));
     await setDoc(ref, item);
   } finally {
     SyncManager.finish(1);
@@ -231,7 +231,7 @@ async function putBulk(storeName, items, sync = true) {
             currentBatch++;
             const batch = writeBatch(db);
             chunk.forEach(item => {
-              const ref = doc(db, 'users', uid, storeName, item.id);
+              const ref = doc(db, 'users', uid, storeName, String(item.id));
               batch.set(ref, item);
             });
             
@@ -347,4 +347,20 @@ function triggerUIRefresh() {
   }, 50);
 }
 
-window.DB = { initDB, put, putBulk, getAll, deleteRecord, deleteByClientId, clearDatabase, listenForChanges, stopListeners, SyncManager };
+window.DB = { initDB, put, putBulk, getAll, deleteRecord, deleteByClientId, clearDatabase, listenForChanges, stopListeners, SyncManager, pushLocalToCloud };
+
+async function pushLocalToCloud() {
+  if (!auth.currentUser) {
+    alert("Faça login para sincronizar para a nuvem.");
+    return;
+  }
+  const clients = await getAll('clients');
+  const videos = await getAll('videos');
+  const configs = await getAll('monthlyConfig');
+  
+  if (clients.length > 0) await putBulk('clients', clients, true);
+  if (videos.length > 0) await putBulk('videos', videos, true);
+  if (configs.length > 0) await putBulk('monthlyConfig', configs, true);
+  
+  alert("Sincronização forçada enviada! Acompanhe a barra de progresso.");
+}

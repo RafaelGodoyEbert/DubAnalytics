@@ -714,8 +714,8 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
     body: videos.filter(v => v.tipo_item !== 'outros').map(v => {
       let status;
       if (!v.feito)                { status = 'PENDENTE'; }
-      else if (v.cobrado === false) { status = 'ENTREGUE'; }
-      else                         { status = 'COBRADO'; }
+      else if (v.cobrado === false) { status = 'CORTESIA'; }
+      else                         { status = ''; }
       const row = [
         status,
         toSafePDF(v.titulo || '–').toUpperCase(),
@@ -767,9 +767,8 @@ function exportMonthlyReportPDF(clientName, monthLabel, monthPeriod, videos, sum
     },
     didParseCell: function(data) {
         if (data.section === 'body' && data.column.index === 0) {
-            if (data.cell.raw === 'COBRADO')   data.cell.styles.textColor = [16, 185, 129];
-            else if (data.cell.raw === 'ENTREGUE') data.cell.styles.textColor = [96, 165, 250];
-            else data.cell.styles.textColor = [239, 68, 68];
+            if (data.cell.raw === 'CORTESIA') data.cell.styles.textColor = [96, 165, 250];
+            else if (data.cell.raw === 'PENDENTE') data.cell.styles.textColor = [239, 68, 68];
         }
     },
     margin: { left: 15, right: 15 }

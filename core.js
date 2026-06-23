@@ -117,6 +117,11 @@ window.loadStateFromDB = async function() {
 window.refreshUI = function() {
   updateSidebar();
   
+  if (State.activeView === 'import' && State.clients.length > 0) {
+    showView('general');
+    return;
+  }
+  
   if (State.activeView === 'general') {
     renderGeneralAnalytics();
   } else if (State.activeView === 'client' && State.selectedClient) {
@@ -882,6 +887,19 @@ window.openClientModal = function(existingId) {
         '<div style="font-size:10px; color:var(--text-dim); margin-top:2px">Oculta campos de Chars, Idiomas, Ratio e Transcrição. Ideal para clientes de vídeo/redes sociais.</div>' +
       '</div>' +
     '</div>' +
+    '<div style="margin-top:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px">' +
+      '<h3 style="font-size:12px; color:var(--accent); margin-bottom:10px">Configuração Padrão (Copida para novos meses)</h3>' +
+      '<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px">' +
+        '<div class="form-group"><label>Preço / Vídeo</label><input type="number" id="new-client-ppv" value="' + (c && c.default_ppv !== undefined ? c.default_ppv : 40) + '"></div>' +
+        '<div class="form-group"><label>Base R$</label><input type="number" id="new-client-base" value="' + (c && c.default_base !== undefined ? c.default_base : 500) + '"></div>' +
+        '<div class="form-group"><label>Base Vídeos</label><input type="number" id="new-client-bvid" value="' + (c && c.default_bvid !== undefined ? c.default_bvid : 15) + '"></div>' +
+        '<div class="form-group"><label>Bônus R$</label><input type="number" id="new-client-bonus" value="' + (c && c.default_bonus !== undefined ? c.default_bonus : 0) + '"></div>' +
+        '<div style="grid-column: span 2; display:flex; align-items:center; gap:8px">' +
+          '<input type="checkbox" id="new-client-comp" ' + (c && c.default_comp ? 'checked' : '') + ' style="width:16px; height:16px">' +
+          '<label for="new-client-comp" style="font-size:11px; margin:0; cursor:pointer">Compensar saldo de vídeos (banco de vídeos)</label>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
     '<div class="modal-footer">' +
        '<button class="btn-ghost" onclick="closeModal()">Cancelar</button>' +
        '<button class="btn-accent" onclick="saveClient(\'' + (existingId || '') + '\')">Salvar Cliente</button>' +
@@ -893,11 +911,21 @@ window.saveClient = async function(existingId) {
   var name = document.getElementById('new-client-name').value.trim();
   if (!name) return;
   var simples = document.getElementById('new-client-simples') ? document.getElementById('new-client-simples').checked : false;
+  
+  var defaults = {
+    default_ppv: parseFloat(document.getElementById('new-client-ppv').value) || 0,
+    default_base: parseFloat(document.getElementById('new-client-base').value) || 0,
+    default_bvid: parseFloat(document.getElementById('new-client-bvid').value) || 0,
+    default_bonus: parseFloat(document.getElementById('new-client-bonus').value) || 0,
+    default_comp: document.getElementById('new-client-comp').checked
+  };
+
   if (existingId) {
     var client = State.clients.find(function(c) { return c.id === existingId; });
     if (client) {
       client.name = name;
       client.simples = simples;
+      Object.assign(client, defaults);
       await DB.put('clients', client);
       updateSidebar();
       if (State.selectedClient && State.selectedClient.id === existingId) { State.selectedClient = client; renderClientWorkspace(); }
@@ -905,6 +933,7 @@ window.saveClient = async function(existingId) {
   } else {
     var id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
     var newClient = { id: id, name: name, active: true, simples: simples };
+    Object.assign(newClient, defaults);
     await DB.put('clients', newClient);
     State.clients.push(newClient); updateSidebar(); selectClient(id);
   }
@@ -938,7 +967,17 @@ window.saveMonthModal = async function(existingId) {
   
   var label = nameEl.value + ' ' + yearEl.value;
   var mId = existingId || (State.selectedClient.id + '_' + label.replace(/\s+/g, '_'));
-  var config = existingId ? State.monthlyConfigs.find(function(x) { return x.id === existingId; }) : { id: mId, clientId: State.selectedClient.id, price_per_video: 40, base_payment: 500, base_videos: 15, bonus: 0, compensate: false };
+  
+  var cDef = State.selectedClient;
+  var config = existingId ? State.monthlyConfigs.find(function(x) { return x.id === existingId; }) : { 
+    id: mId, 
+    clientId: State.selectedClient.id, 
+    price_per_video: cDef.default_ppv !== undefined ? cDef.default_ppv : 40, 
+    base_payment: cDef.default_base !== undefined ? cDef.default_base : 500, 
+    base_videos: cDef.default_bvid !== undefined ? cDef.default_bvid : 15, 
+    bonus: cDef.default_bonus !== undefined ? cDef.default_bonus : 0, 
+    compensate: cDef.default_comp !== undefined ? cDef.default_comp : false 
+  };
   if (!config) return;
 
   config.label = label; config.periodo = document.getElementById('m-periodo').value;
@@ -1043,8 +1082,8 @@ window.saveVideoModal = async function(existingId) {
   } else {
     data.link = document.getElementById('v-link').value.trim();
     data.idiomas = parseInt(document.getElementById('v-lang').value) || 7;
-    data.palavras = parseInt(document.getElementById('v-palavras').value) || 0;
-    data.chars = parseInt(document.getElementById('v-chars').value) || 0;
+    data.palavras = parseInt(document.getElementById('v-palavras').value.replace(/\./g, '')) || 0;
+    data.chars = parseInt(document.getElementById('v-chars').value.replace(/\./g, '')) || 0;
     data.tempo = ExcelParser.durationToSeconds(document.getElementById('v-time').value);
     data.tempo_fazer = ExcelParser.durationToSeconds(document.getElementById('v-work').value);
     data.isTest = document.getElementById('v-is-test').checked;

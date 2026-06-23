@@ -63,6 +63,7 @@
        <div id="user-info-box" style="margin-bottom: 10px"></div>
        <button class="btn-ghost" onclick="showView('import')" style="font-size:11px; text-align:left">📥 Importar Excel</button>
        <button class="btn-ghost" onclick="exportBackup()" style="font-size:11px; text-align:left">💾 Backup (JSON)</button>
+       <button class="btn-ghost" onclick="if(window.DB && window.DB.pushLocalToCloud) window.DB.pushLocalToCloud()" style="font-size:11px; text-align:left; color:#10b981; border-color:rgba(16,185,129,0.3)">☁️ Forçar Sinc. Nuvem</button>
        <div style="font-size:9px; color:var(--text-dim); margin-top:5px">v3.0 PREMIUM</div>
     </div>
   </aside>
