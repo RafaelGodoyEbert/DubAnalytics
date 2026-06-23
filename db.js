@@ -170,6 +170,8 @@ async function syncToCloud(storeName, item) {
   } finally {
     SyncManager.finish(1);
   }
+}
+
 function sanitizeForFirebase(obj) {
   if (obj === null || obj === undefined) return null;
   if (typeof obj !== 'object') {
