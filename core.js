@@ -70,6 +70,30 @@ window.clearState = function() {
   renderGeneralAnalytics();
 };
 
+window.exportDossierPDF = function() {
+  var client = State.selectedClient || (State.clients.length > 0 ? State.clients[0] : null);
+  if (!client) {
+    alert("Nenhum cliente disponível para exportar o dossiê.");
+    return;
+  }
+  var cVideos = State.videos.filter(function(v) { return v.clientId === client.id; });
+  var cConfigs = State.monthlyConfigs.filter(function(m) { return m.clientId === client.id; });
+
+  var m = State.selectedMonth;
+  var targetMin = (m && m.target_video_min)
+    || client.default_target_video_min
+    || 15;
+  var targetBaseVids = (m && m.base_videos)
+    || client.default_bvid
+    || 15;
+  var targetTotalMin = (m && m.target_total_minutes)
+    || client.default_target_total_minutes
+    || (targetMin * targetBaseVids);
+
+  var minuteData = Analytics.getMinuteAnalytics(cVideos, cConfigs, targetMin, targetBaseVids, targetTotalMin, m ? m.id : null);
+  Analytics.exportMinuteImpactPDF(client, cVideos, minuteData);
+};
+
 window.updateUserInfo = function() {
   const userBox = document.getElementById('user-info-box');
   if (!userBox) return;
@@ -113,6 +137,18 @@ window.loadStateFromDB = async function() {
     if (c.default_bvid === undefined) c.default_bvid = 15;
     if (c.default_bonus === undefined) c.default_bonus = 0;
     if (c.default_comp === undefined) c.default_comp = false;
+    if (c.default_target_video_min === undefined) c.default_target_video_min = 15;
+    if (c.default_target_total_minutes === undefined) c.default_target_total_minutes = (c.default_target_video_min * c.default_bvid);
+  });
+
+  State.monthlyConfigs.forEach(m => {
+    var parentC = State.clients.find(c => c.id === m.clientId);
+    if (m.target_video_min === undefined) {
+      m.target_video_min = parentC && parentC.default_target_video_min !== undefined ? parentC.default_target_video_min : 15;
+    }
+    if (m.target_total_minutes === undefined) {
+      m.target_total_minutes = parentC && parentC.default_target_total_minutes !== undefined ? parentC.default_target_total_minutes : (m.target_video_min * (m.base_videos || 15));
+    }
   });
   
   window.refreshUI();
@@ -229,6 +265,8 @@ function renderGeneralAnalytics() {
   if (advanced) {
     Analytics.renderAdvancedCharts('gen-advanced-section', advanced);
   }
+  var genMinuteData = Analytics.getMinuteAnalytics(filteredVideos, filteredConfigs, 15, 15);
+  Analytics.renderMinuteImpactSection('gen-minute-section', genMinuteData);
   renderYearSelector();
 }
 
@@ -437,6 +475,13 @@ function renderClientOverview() {
   }
 
   Analytics.renderCharts('client-overview-chart', aggregated);
+
+  // Render Minute Analytics & Proof by A + B (Client Overview)
+  var targetMin = (State.selectedClient && State.selectedClient.default_target_video_min !== undefined) ? State.selectedClient.default_target_video_min : 15;
+  var targetBaseVids = (State.selectedClient && State.selectedClient.default_bvid !== undefined) ? State.selectedClient.default_bvid : 15;
+  var targetTotalMin = (State.selectedClient && State.selectedClient.default_target_total_minutes !== undefined) ? State.selectedClient.default_target_total_minutes : (targetMin * targetBaseVids);
+  var minuteData = Analytics.getMinuteAnalytics(cVideos, cConfigs, targetMin, targetBaseVids, targetTotalMin, null);
+  Analytics.renderMinuteImpactSection('co-minute-section', minuteData);
 }
 
 /* ========== BENCHMARKS & PRICING ========== */
@@ -623,6 +668,12 @@ function renderMonthDetails() {
   var bonusVal = parseFloat(m.bonus);
   document.getElementById('cfg-bonus').value = isNaN(bonusVal) ? 0 : bonusVal;
   
+  var targetMinVal = (m.target_video_min !== undefined && m.target_video_min !== null && m.target_video_min !== '')
+    ? parseFloat(m.target_video_min)
+    : (State.selectedClient ? State.selectedClient.default_target_video_min || 15 : 15);
+  var targetMinEl = document.getElementById('cfg-target-min');
+  if (targetMinEl) targetMinEl.value = isNaN(targetMinVal) || targetMinVal === 0 ? 15 : targetMinVal;
+
   document.getElementById('cfg-comp').checked = m.compensate || false;
 
   var mVideos = State.videos.filter(function(v) { return v.monthId === m.id; });
@@ -718,6 +769,55 @@ function renderMonthDetails() {
   var perHour = totalWorkSeconds > 0 ? earnings / (totalWorkSeconds / 3600) : 0;
   document.getElementById('m-stat-per-hour').innerText = 'R$ ' + perHour.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 
+  function parseDurSec(val) {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (typeof val === 'string') {
+      val = val.trim();
+      if (val.includes(':')) {
+        var parts = val.split(':').map(Number);
+        if (parts.some(isNaN)) return 0;
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+      }
+      var num = parseFloat(val);
+      return isNaN(num) ? 0 : num;
+    }
+    return 0;
+  }
+
+  // Estatísticas de Minutos e Equivalência do Mês
+  var monthDoneVids = videoItems.filter(function(v) { return v.feito && parseDurSec(v.tempo) > 0; });
+  var monthVideoSec = monthDoneVids.reduce(function(s, v) { return s + parseDurSec(v.tempo); }, 0);
+  var monthVideoMin = monthVideoSec / 60;
+  var monthAvgMin = monthDoneVids.length > 0 ? monthVideoMin / monthDoneVids.length : 0;
+  var monthEquiv = targetMinVal > 0 ? monthVideoMin / targetMinVal : 0;
+
+  var avgMinEl = document.getElementById('m-stat-avg-min');
+  if (avgMinEl) {
+    avgMinEl.innerText = monthAvgMin.toFixed(1) + ' min';
+    avgMinEl.className = 'stat-value ' + (monthAvgMin > targetMinVal ? 'text-danger' : 'text-success');
+  }
+
+  var equivEl = document.getElementById('m-stat-equiv-vids');
+  if (equivEl) {
+    equivEl.innerText = monthEquiv.toFixed(1) + ' vids';
+  }
+
+  // Renderiza o Card de Impacto por A + B no Mês Ativo (usando m.id)
+  var targetTotalMinVal = (m.target_total_minutes !== undefined && m.target_total_minutes !== null && m.target_total_minutes !== '')
+    ? parseFloat(m.target_total_minutes)
+    : (targetMinVal * (parseFloat(m.base_videos) || 15));
+  var targetTotalMinEl = document.getElementById('cfg-target-total-min');
+  if (targetTotalMinEl) targetTotalMinEl.value = isNaN(targetTotalMinVal) || targetTotalMinVal === 0 ? (targetMinVal * (parseFloat(m.base_videos) || 15)) : targetTotalMinVal;
+
+  if (State.selectedClient) {
+    var cVideos = State.videos.filter(function(v) { return v.clientId === State.selectedClient.id; });
+    var cConfigs = State.monthlyConfigs.filter(function(cm) { return cm.clientId === State.selectedClient.id; });
+    var monthMinuteData = Analytics.getMinuteAnalytics(cVideos, cConfigs, targetMinVal, parseFloat(m.base_videos) || 15, targetTotalMinVal, m.id);
+    Analytics.renderMinuteImpactSection('month-minute-section', monthMinuteData);
+  }
+
   // Atualiza cabeçalho da tabela dinamicamente (simples vs full)
   var thead = document.querySelector('#video-table thead tr');
   if (thead) {
@@ -777,6 +877,10 @@ function renderMonthDetails() {
         return '<tr ' + rowStyle + '><td>' + statusBtn + '</td><td>' + titleDiv + sub + '</td>' + actions + '</tr>';
       }
 
+      var targetMinLimit = (m.target_video_min !== undefined) ? m.target_video_min : (State.selectedClient ? State.selectedClient.default_target_video_min || 15 : 15);
+      var vMin = (parseFloat(v.tempo) || 0) / 60;
+      var overBadge = (vMin > targetMinLimit) ? ' <span class="badge bg-danger" style="font-size:9px" title="Vídeo de ' + vMin.toFixed(0) + ' min (+' + (vMin - targetMinLimit).toFixed(0) + ' min acima da meta de ' + targetMinLimit + ' min)">+' + (vMin - targetMinLimit).toFixed(0) + 'm</span>' : '';
+
       return '<tr ' + rowStyle + '>' +
         '<td>' + statusBtn + '</td>' +
         '<td><button class="badge ' + (v.transcrito ? 'bg-info' : '') + '" onclick="toggleVideoField(\'' + v.id + '\', \'transcrito\')">' + (v.transcrito ? '\u270e Sim' : '\u2014 N\u00e3o') + '</button></td>' +
@@ -790,7 +894,7 @@ function renderMonthDetails() {
         '<td class="text-accent">' + v.idiomas + '</td>' +
         '<td>' + (parseInt(v.chars) || 0).toLocaleString('pt-BR') + '</td>' +
         '<td style="font-weight:600; color:' + (ratio > 8 ? 'var(--danger)' : ratio > 6 ? 'var(--accent)' : '#10b981') + '">' + (ratio !== '\u2013' ? ratio + 'x' : '\u2013') + '</td>' +
-        '<td>' + ExcelParser.secondsToHMS(v.tempo) + '</td>' +
+        '<td>' + ExcelParser.secondsToHMS(v.tempo) + overBadge + '</td>' +
         actions +
       '</tr>';
     } catch (e) {
@@ -917,6 +1021,8 @@ window.openClientModal = function(existingId) {
         '<div class="form-group"><label>Preço / Vídeo</label><input type="number" id="new-client-ppv" value="' + (c && c.default_ppv !== undefined ? c.default_ppv : 40) + '"></div>' +
         '<div class="form-group"><label>Base R$</label><input type="number" id="new-client-base" value="' + (c && c.default_base !== undefined ? c.default_base : 500) + '"></div>' +
         '<div class="form-group"><label>Base Vídeos</label><input type="number" id="new-client-bvid" value="' + (c && c.default_bvid !== undefined ? c.default_bvid : 15) + '"></div>' +
+        '<div class="form-group"><label>Minutos / Vídeo (Meta)</label><input type="number" id="new-client-target-min" value="' + (c && c.default_target_video_min !== undefined ? c.default_target_video_min : 15) + '"></div>' +
+        '<div class="form-group"><label>Franquia Minutos/Mês</label><input type="number" id="new-client-target-total-min" value="' + (c && c.default_target_total_minutes !== undefined ? c.default_target_total_minutes : 225) + '"></div>' +
         '<div class="form-group"><label>Bônus R$</label><input type="number" id="new-client-bonus" value="' + (c && c.default_bonus !== undefined ? c.default_bonus : 0) + '"></div>' +
         '<div style="grid-column: span 2; display:flex; align-items:center; gap:8px">' +
           '<input type="checkbox" id="new-client-comp" ' + (c && c.default_comp ? 'checked' : '') + ' style="width:16px; height:16px">' +
@@ -939,10 +1045,15 @@ window.saveClient = async function(existingId) {
   var defaults = {
     default_ppv: parseFloat(document.getElementById('new-client-ppv').value) || 0,
     default_base: parseFloat(document.getElementById('new-client-base').value) || 0,
-    default_bvid: parseFloat(document.getElementById('new-client-bvid').value) || 0,
+    default_bvid: parseFloat(document.getElementById('new-client-bvid').value) || 15,
+    default_target_video_min: parseFloat(document.getElementById('new-client-target-min').value) || 15,
+    default_target_total_minutes: parseFloat(document.getElementById('new-client-target-total-min').value) || 0,
     default_bonus: parseFloat(document.getElementById('new-client-bonus').value) || 0,
     default_comp: document.getElementById('new-client-comp').checked
   };
+  if (!defaults.default_target_total_minutes) {
+    defaults.default_target_total_minutes = defaults.default_target_video_min * defaults.default_bvid;
+  }
 
   if (existingId) {
     var client = State.clients.find(function(c) { return c.id === existingId; });

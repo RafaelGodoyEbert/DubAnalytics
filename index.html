@@ -92,6 +92,7 @@
             Exportar com Tempo
           </label>
           <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
+          <button onclick="exportDossierPDF()" class="btn-accent" style="background:#8b5cf6; border-color:#8b5cf6" title="Exportar Dossiê Comercial por A + B">📄 Dossiê A+B</button>
         </div>
       </header>
       <section class="container" style="overflow-y:auto; flex:1">
@@ -119,6 +120,8 @@
 
          <!-- Seção de Inteligência Avançada -->
          <div id="gen-advanced-section"></div>
+         <!-- Seção de Minutos Global (A + B) -->
+         <div id="gen-minute-section"></div>
       </section>
     </div>
 
@@ -147,6 +150,7 @@
                       Exportar com Tempo
                     </label>
                     <button onclick="exportCurrentViewPDF()" class="btn-accent">Exportar PDF</button>
+                    <button onclick="exportDossierPDF()" class="btn-accent" style="background:#8b5cf6; border-color:#8b5cf6" title="Exportar Dossiê Comercial por A + B">📄 Dossiê A+B</button>
                  </div>
              </header>
              <div class="container" style="padding:15px 30px; overflow-y:auto; flex:1">
@@ -171,6 +175,8 @@
                 
                 <!-- Advanced Stats for Client -->
                 <div id="co-advanced-section"></div>
+                <!-- Minute Analytics & Impact Section (Proof by A + B) -->
+                <div id="co-minute-section"></div>
              </div>
           </div>
           
@@ -189,6 +195,7 @@
                     <button onclick="if(State.selectedMonth) deleteMonth(State.selectedMonth.id)" class="btn-ghost" title="Excluir Mês" style="color:var(--danger)">🗑️</button>
                     <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
                     <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
+                    <button onclick="exportDossierPDF()" class="btn-accent" style="background:#8b5cf6; border-color:#8b5cf6" title="Exportar Dossiê Comercial por A + B">📄 Dossiê A+B</button>
                     <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
                  </div>
              </header>
@@ -198,18 +205,25 @@
                    <div class="cfg-item"><span>Preço/Vídeo:</span> <input type="number" id="cfg-ppv" onchange="updateMonthConfig('price_per_video', this.value)"></div>
                    <div class="cfg-item"><span>Base R$:</span> <input type="number" id="cfg-base" onchange="updateMonthConfig('base_payment', this.value)"></div>
                    <div class="cfg-item"><span>Base Vídeos:</span> <input type="number" id="cfg-bvid" onchange="updateMonthConfig('base_videos', this.value)"></div>
+                   <div class="cfg-item" title="Limite meta por vídeo em minutos"><span>Min/Vídeo:</span> <input type="number" id="cfg-target-min" onchange="updateMonthConfig('target_video_min', this.value)"></div>
+                   <div class="cfg-item" title="Franquia meta de minutos totais no mês (ex: 200, 300, 500)"><span>Meta Min/Mês:</span> <input type="number" id="cfg-target-total-min" onchange="updateMonthConfig('target_total_minutes', this.value)"></div>
                    <div class="cfg-item"><span>Bônus R$:</span> <input type="number" id="cfg-bonus" onchange="updateMonthConfig('bonus', this.value)"></div>
                    <div class="cfg-item" title="Ativar compensação acumulada de vídeos (débito/crédito)"><span>Compensar?</span> <label class="switch"><input type="checkbox" id="cfg-comp" onchange="updateMonthConfig('compensate', this.checked)"><span class="slider"></span></label></div>
                 </div>
 
-                <div class="stats-grid" style="grid-template-columns:repeat(auto-fit, minmax(140px, 1fr))">
-                   <div class="card"><small>ENTREGUES</small><div id="m-stat-done" class="stat-value">0/0</div></div>
-                   <div class="card" title="Saldo acumulado de vídeos (Entregues - Base)"><small>SALDO VÍDEOS</small><div id="m-stat-balance" class="stat-value">0</div></div>
-                   <div class="card"><small>GANHO MÊS</small><div id="m-stat-pay" class="stat-value text-accent">R$ 0</div></div>
-                   <div class="card"><small>TRABALHADO</small><div id="m-stat-hours" class="stat-value">00:00:00</div></div>
-                   <div class="card"><small>RATIO MÊS</small><div id="m-stat-ratio" class="stat-value text-accent">0.0x</div></div>
-                   <div class="card"><small>R$ / HORA</small><div id="m-stat-per-hour" class="stat-value text-success">R$ 0</div></div>
-                </div>
+                 <div class="stats-grid" style="grid-template-columns:repeat(auto-fit, minmax(130px, 1fr))">
+                    <div class="card"><small>ENTREGUES</small><div id="m-stat-done" class="stat-value">0/0</div></div>
+                    <div class="card" title="Saldo acumulado de vídeos (Entregues - Base)"><small>SALDO VÍDEOS</small><div id="m-stat-balance" class="stat-value">0</div></div>
+                    <div class="card"><small>GANHO MÊS</small><div id="m-stat-pay" class="stat-value text-accent">R$ 0</div></div>
+                    <div class="card"><small>TRABALHADO</small><div id="m-stat-hours" class="stat-value">00:00:00</div></div>
+                    <div class="card"><small>RATIO MÊS</small><div id="m-stat-ratio" class="stat-value text-accent">0.0x</div></div>
+                    <div class="card" title="Duração média de vídeo neste mês vs meta"><small>MÉDIA MIN/VÍDEO</small><div id="m-stat-avg-min" class="stat-value">0 min</div></div>
+                    <div class="card" title="Vídeos equivalentes no padrão meta (15 min)"><small>VÍDEOS EQUIV.</small><div id="m-stat-equiv-vids" class="stat-value text-accent">0</div></div>
+                    <div class="card"><small>R$ / HORA</small><div id="m-stat-per-hour" class="stat-value text-success">R$ 0</div></div>
+                 </div>
+
+                 <!-- Seção Demonstrativa de Minutos (Por A + B) no Mês -->
+                 <div id="month-minute-section"></div>
 
                 <div class="card table-card">
                    <table id="video-table">
