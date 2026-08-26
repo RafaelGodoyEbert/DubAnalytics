@@ -45,6 +45,7 @@ window.boot = async function() {
   
   renderYearSelector();
   setupEventListeners();
+  initSidebarCollapse();
   
   // Privacy & Settings Init
   State.privacyMode = localStorage.getItem('dub_privacy_mode') === '1';
@@ -199,11 +200,55 @@ window.showView = function showView(viewId) {
 
   closeMobileMenu();
 
+  if (viewId !== 'client') {
+    document.body.classList.remove('in-month-view');
+  }
+
   if (viewId === 'general') renderGeneralAnalytics();
   if (viewId === 'client') renderClientWorkspace();
 };
 
-/* ========== MOBILE MENU CONTROLLER ========== */
+/* ========== SIDEBAR & MOBILE MENU CONTROLLERS ========== */
+window.toggleSidebarCollapse = function() {
+  document.body.classList.toggle('sidebar-collapsed');
+  var isCollapsed = document.body.classList.contains('sidebar-collapsed');
+  localStorage.setItem('dub_sidebar_collapsed', isCollapsed ? '1' : '0');
+  updateSidebarCollapseButtons();
+};
+
+window.toggleMonthSidebarCollapse = function() {
+  document.body.classList.toggle('month-sidebar-collapsed');
+  var isCollapsed = document.body.classList.contains('month-sidebar-collapsed');
+  localStorage.setItem('dub_month_sidebar_collapsed', isCollapsed ? '1' : '0');
+  updateSidebarCollapseButtons();
+};
+
+function initSidebarCollapse() {
+  if (localStorage.getItem('dub_sidebar_collapsed') === '1') {
+    document.body.classList.add('sidebar-collapsed');
+  }
+  if (localStorage.getItem('dub_month_sidebar_collapsed') === '1') {
+    document.body.classList.add('month-sidebar-collapsed');
+  }
+  updateSidebarCollapseButtons();
+
+  window.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      window.toggleSidebarCollapse();
+    }
+  });
+}
+
+function updateSidebarCollapseButtons() {
+  var isMainCollapsed = document.body.classList.contains('sidebar-collapsed');
+  var btn = document.getElementById('sidebar-collapse-btn');
+  if (btn) btn.title = isMainCollapsed ? 'Expandir Barra Lateral (Ctrl+B)' : 'Recolher Barra Lateral (Ctrl+B)';
+  var mBtn = document.getElementById('month-sb-collapse-btn');
+  var isMonthCollapsed = document.body.classList.contains('month-sidebar-collapsed');
+  if (mBtn) mBtn.title = isMonthCollapsed ? 'Expandir Lista de Meses' : 'Recolher Lista de Meses';
+}
+
 window.toggleMobileMenu = function() {
   document.body.classList.toggle('sidebar-open');
 };
@@ -385,6 +430,9 @@ function renderClientWorkspace() {
   overviewEl.style.display = 'none';
   monthEl.style.display = 'none';
   benchEl.style.display = 'none';
+
+  var isMonthActive = State.clientSubView === 'month' && !!State.selectedMonth;
+  document.body.classList.toggle('in-month-view', isMonthActive);
 
   if (State.clientSubView === 'overview') {
     overviewEl.style.display = 'flex';
@@ -839,8 +887,8 @@ function renderMonthDetails() {
       if (isOutros) {
         var valorFmt = (parseFloat(v.valor_individual) || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2});
         var outrosCols = isSimples
-          ? '<td><div style="font-weight:600">' + (v.titulo || '\u2013') + '</div><div style="font-size:10px; color:#10b981">Tarefa avulsa \u2022 R$ ' + valorFmt + (v.comentario ? ' \u2022 ' + v.comentario : '') + '</div></td>'
-          : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="4"><div style="font-weight:600">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
+          ? '<td><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + '</div><div style="font-size:10px; color:#10b981">Tarefa avulsa \u2022 R$ ' + valorFmt + (v.comentario ? ' \u2022 ' + v.comentario : '') + '</div></td>'
+          : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="4"><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
         var feitoCls = v.feito ? 'bg-done' : 'bg-todo';
         var feitoLbl = v.feito ? '\u2713 Feito' : '\u2717 Pend.';
         return '<tr style="background:rgba(16,185,129,0.05); border-left:3px solid #10b981">' +
@@ -861,8 +909,8 @@ function renderMonthDetails() {
       var rowStyle = 'style="background:' + rowBg + '; border-left:' + rowBdr + '"';
       var statusBtn = '<button class="badge ' + stCls + '" onclick="cycleVideoStatus(\'' + v.id + '\')" title="' + stTitle + '">' + stLabel + '</button>';
 
-      var titleDiv = '<div style="font-weight:600">' +
-        (v.link ? '<a href="' + v.link + '" target="_blank" style="color:var(--accent); text-decoration:none">' + (v.titulo || '\u2013') + ' \ud83d\udd17</a>' : (v.titulo || '\u2013')) +
+      var titleDiv = '<div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar este item">' +
+        (v.link ? '<a href="' + v.link + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent); text-decoration:none">' + (v.titulo || '\u2013') + ' \ud83d\udd17</a>' : (v.titulo || '\u2013')) +
         (isBenchmark ? ' <span class="badge bg-todo" style="font-size:9px">TESTE</span>' : '') +
         '</div>';
 
@@ -917,6 +965,10 @@ function renderMonthDetails() {
     if (insertAt >= 0) {
       rows.splice(insertAt + 1, 0, separator);
     }
+  }
+
+  if (rows.length === 0) {
+    rows.push('<tr><td colspan="8" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
   }
 
   tbody.innerHTML = rows.join('');
@@ -1121,6 +1173,11 @@ window.saveMonthModal = async function(existingId) {
 };
 
 window.openVideoModal = function(videoId) {
+  if (!videoId && (!State.selectedClient || !State.selectedMonth)) {
+    alert("Por favor, selecione um cliente e um mês antes de adicionar um novo item.");
+    return;
+  }
+
   var v = videoId ? State.videos.find(function(x) { return x.id === videoId; }) : null;
   var tipoAtual = v ? (v.tipo_item || 'video') : 'video';
   var isOutros = tipoAtual === 'outros';
@@ -1141,7 +1198,7 @@ window.openVideoModal = function(videoId) {
     '</div>' +
 
     '<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px">' +
-      '<div class="form-group" style="grid-column: span 2"><label>Título / Descrição</label><input type="text" id="v-title" value="' + (v ? v.titulo : '') + '" placeholder="Ex: Fuga no GTA 5 / Revisão de roteiro..."></div>' +
+      '<div class="form-group" style="grid-column: span 2"><label>Título / Descrição</label><input type="text" id="v-title" value="' + (v ? (v.titulo || '') : '') + '" placeholder="Ex: Fuga no GTA 5 / Revisão de roteiro..."></div>' +
 
       // campos só de vídeo
       '<div id="video-fields" style="display:contents; ' + videoFieldsStyle + '">' +
@@ -1172,6 +1229,11 @@ window.openVideoModal = function(videoId) {
       '<button class="btn-accent" style="padding: 12px 30px; font-size: 12px" onclick="saveVideoModal(\'' + (videoId || '') + '\')">Salvar</button>' +
     '</div>'
   );
+
+  setTimeout(function() {
+    var titleEl = document.getElementById('v-title');
+    if (titleEl) titleEl.focus();
+  }, 100);
 };
 
 window.switchTipoItem = function(tipo) {

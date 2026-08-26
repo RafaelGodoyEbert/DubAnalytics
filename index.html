@@ -34,7 +34,10 @@
           <div style="font-weight:700; font-size:18px; color:var(--accent)">DubAnalytics</div>
           <div style="font-size:10px; color:var(--text-dim)">Business & Performance Intelligence</div>
         </div>
-        <button id="privacy-toggle" onclick="togglePrivacyMode()" class="btn-sidebar" title="Ocultar/Mostrar Valores (Modo Privacidade)" style="font-size:16px; opacity:0.8">👁️</button>
+        <div style="display:flex; align-items:center; gap:4px">
+          <button id="privacy-toggle" onclick="togglePrivacyMode()" class="btn-sidebar" title="Ocultar/Mostrar Valores (Modo Privacidade)" style="font-size:16px; opacity:0.8">👁️</button>
+          <button id="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" class="btn-sidebar hide-on-mobile" title="Recolher Barra Lateral (Ctrl+B)" style="font-size:14px; opacity:0.8">◀</button>
+        </div>
       </div>
     </div>
     
@@ -74,7 +77,10 @@
     <!-- VIEW: GENERAL OVERVIEW -->
     <div id="general-view" class="view active">
       <header class="view-header">
-        <h1>🌍 Consolidação do Trabalho</h1>
+        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:200px">
+          <button class="sidebar-expand-trigger" onclick="toggleSidebarCollapse()" title="Expandir Menu Clientes">☰ Clientes</button>
+          <h1 style="font-size:24px; margin:0">🌍 Consolidação do Trabalho</h1>
+        </div>
         <div class="header-actions">
           <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir ganhos históricos de clientes arquivados/inativos">
             <input type="checkbox" id="gen-show-inactive" onchange="toggleShowInactive(this.checked)" checked> 
@@ -135,7 +141,10 @@
                    <h2 id="client-title" style="font-size:16px; margin:0">Cliente</h2>
                    <button onclick="if(State.selectedClient) openClientModal(State.selectedClient.id)" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:2px" title="Renomear cliente">✎</button>
                 </div>
-                <button onclick="openMonthModal()" class="btn-add-month">+ Mês</button>
+                <div style="display:flex; align-items:center; gap:4px">
+                  <button onclick="openMonthModal()" class="btn-add-month">+ Mês</button>
+                  <button id="month-sb-collapse-btn" onclick="toggleMonthSidebarCollapse()" class="btn-sidebar hide-on-mobile" title="Recolher Lista de Meses" style="font-size:12px; opacity:0.8">◀</button>
+                </div>
              </div>
              <div id="month-list" class="month-list"></div>
           </aside>
@@ -143,7 +152,11 @@
           <!-- CLIENT OVERVIEW -->
           <div id="client-overview-section" class="month-content">
              <header class="view-header" style="padding:15px 30px">
-                <h1 style="font-size:20px; margin:0">📊 Perfil de Rentabilidade</h1>
+                <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:200px">
+                   <button class="sidebar-expand-trigger" onclick="toggleSidebarCollapse()" title="Expandir Menu Clientes">☰ Clientes</button>
+                   <button class="month-expand-trigger hide-on-mobile" onclick="toggleMonthSidebarCollapse()" title="Mostrar Lista de Meses">📅 Meses</button>
+                   <h1 style="font-size:20px; margin:0">📊 Perfil de Rentabilidade</h1>
+                </div>
                  <div class="header-actions">
                     <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir métricas de esforço (tempo) no PDF">
                       <input type="checkbox" id="pdf-show-time-client" onchange="document.getElementById('pdf-show-time-month').checked = this.checked; document.getElementById('pdf-show-time').checked = this.checked;"> 
@@ -183,9 +196,13 @@
           <!-- MONTH DETAILS -->
           <div id="month-details-section" class="month-content">
              <header id="month-header" class="view-header" style="padding:15px 30px">
-                <div style="display:flex; flex-direction:column">
-                   <h1 id="month-label" style="font-size:20px; margin:0">Mês</h1>
-                   <small id="month-period" style="color:var(--text-dim)"></small>
+                <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:180px">
+                   <button class="sidebar-expand-trigger" onclick="toggleSidebarCollapse()" title="Expandir Menu Clientes">☰ Clientes</button>
+                   <button class="month-expand-trigger hide-on-mobile" onclick="toggleMonthSidebarCollapse()" title="Mostrar Lista de Meses">📅 Meses</button>
+                   <div style="display:flex; flex-direction:column">
+                      <h1 id="month-label" style="font-size:20px; margin:0">Mês</h1>
+                      <small id="month-period" style="color:var(--text-dim)"></small>
+                   </div>
                 </div>
                  <div class="header-actions">
                     <label style="display:flex; align-items:center; gap:8px; font-size:11px; cursor:pointer; color:var(--text-dim)" title="Incluir métricas de esforço (tempo) no PDF">
@@ -196,7 +213,7 @@
                     <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
                     <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
                     <button onclick="exportDossierPDF()" class="btn-accent" style="background:#8b5cf6; border-color:#8b5cf6" title="Exportar Dossiê Comercial por A + B">📄 Dossiê A+B</button>
-                    <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
+                    <button onclick="openVideoModal()" class="btn-accent btn-add-video-primary">+ Novo Vídeo</button>
                  </div>
              </header>
              
@@ -241,7 +258,11 @@
           <!-- BENCHMARKS VIEW -->
           <div id="benchmarks-section" class="month-content">
              <header class="view-header" style="padding:15px 30px">
-                <h1 style="font-size:20px; margin:0">🎯 Benchmarks & Inteligência de Preço</h1>
+                <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:200px">
+                   <button class="sidebar-expand-trigger" onclick="toggleSidebarCollapse()" title="Expandir Menu Clientes">☰ Clientes</button>
+                   <button class="month-expand-trigger hide-on-mobile" onclick="toggleMonthSidebarCollapse()" title="Mostrar Lista de Meses">📅 Meses</button>
+                   <h1 style="font-size:20px; margin:0">🎯 Benchmarks & Inteligência de Preço</h1>
+                </div>
                 <div class="header-actions">
                    <div style="font-size:11px; color:var(--text-dim)">Meta R$/Hora:</div>
                    <input type="number" id="target-rate-input" value="60" style="width:85px" onchange="updateTargetRate(this.value)">
@@ -270,6 +291,11 @@
     </div>
 
   </main>
+
+  <!-- MOBILE FLOATING ACTION BUTTON -->
+  <button id="mobile-fab-add-video" class="mobile-fab" onclick="openVideoModal()" title="Adicionar Novo Vídeo">
+    <span>➕</span> Novo Vídeo
+  </button>
 
   <!-- MODALS -->
   <div id="modal-overlay" class="modal-overlay">
