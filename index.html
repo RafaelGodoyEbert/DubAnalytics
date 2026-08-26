@@ -213,7 +213,7 @@
                     <button onclick="if(State.selectedMonth) openMonthModal(State.selectedMonth.id)" class="btn-ghost" title="Config do Mês">⚙️</button>
                     <button onclick="exportMonthPDF()" class="btn-accent" style="background:var(--success); border-color:var(--success)">Exportar PDF</button>
                     <button onclick="exportDossierPDF()" class="btn-accent" style="background:#8b5cf6; border-color:#8b5cf6" title="Exportar Dossiê Comercial por A + B">📄 Dossiê A+B</button>
-                    <button onclick="openVideoModal()" class="btn-accent btn-add-video-primary">+ Novo Vídeo</button>
+                    <button onclick="openVideoModal()" class="btn-accent">+ Novo Vídeo</button>
                  </div>
              </header>
              
@@ -291,11 +291,6 @@
     </div>
 
   </main>
-
-  <!-- MOBILE FLOATING ACTION BUTTON -->
-  <button id="mobile-fab-add-video" class="mobile-fab" onclick="openVideoModal()" title="Adicionar Novo Vídeo">
-    <span>➕</span> Novo Vídeo
-  </button>
 
   <!-- MODALS -->
   <div id="modal-overlay" class="modal-overlay">

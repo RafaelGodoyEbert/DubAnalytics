@@ -200,10 +200,6 @@ window.showView = function showView(viewId) {
 
   closeMobileMenu();
 
-  if (viewId !== 'client') {
-    document.body.classList.remove('in-month-view');
-  }
-
   if (viewId === 'general') renderGeneralAnalytics();
   if (viewId === 'client') renderClientWorkspace();
 };
@@ -430,9 +426,6 @@ function renderClientWorkspace() {
   overviewEl.style.display = 'none';
   monthEl.style.display = 'none';
   benchEl.style.display = 'none';
-
-  var isMonthActive = State.clientSubView === 'month' && !!State.selectedMonth;
-  document.body.classList.toggle('in-month-view', isMonthActive);
 
   if (State.clientSubView === 'overview') {
     overviewEl.style.display = 'flex';
