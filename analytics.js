@@ -59,6 +59,211 @@ function monthLabelToSortKey(label) {
   return year * 100 + monthIdx;
 }
 
+function isVideoCobrado(v) {
+  return !!(v && v.feito && v.cobrado !== false);
+}
+
+/**
+ * Cálculo Financeiro: Modelo Legado / Por Vídeo (per_video)
+ */
+function calculatePerVideoBilling(config, videos, context) {
+  config = config || {};
+  videos = Array.isArray(videos) ? videos : [];
+  context = context || {};
+
+  let ppv = parseFloat(config.price_per_video);
+  if (isNaN(ppv)) ppv = 40;
+
+  let base = parseFloat(config.base_payment);
+  if (isNaN(base)) base = 500;
+
+  let baseVideos = parseFloat(config.base_videos);
+  if (isNaN(baseVideos)) baseVideos = 15;
+
+  let bonus = parseFloat(config.bonus);
+  if (isNaN(bonus)) bonus = 0;
+
+  const outrosItems = videos.filter(v => isVideoCobrado(v) && v.tipo_item === 'outros');
+  const outrosEarnings = outrosItems.reduce((s, v) => s + (parseFloat(v.valor_individual) || 0), 0);
+
+  const normalVideos = videos.filter(v => isVideoCobrado(v) && v.tipo_item !== 'outros');
+  const cobradosCount = normalVideos.length;
+
+  const billableMinutes = normalVideos.reduce((sum, v) => {
+    const sec = parseDurationSec(v.tempo);
+    return sum + (sec > 0 ? sec / 60 : 0);
+  }, 0);
+
+  const targetVideoMin = parseFloat(config.target_video_min) || 15;
+  const targetTotalMin = (config.target_total_minutes !== undefined && parseFloat(config.target_total_minutes) > 0)
+    ? parseFloat(config.target_total_minutes)
+    : (targetVideoMin * baseVideos);
+
+  let extraToPayThisMonth = 0;
+  let balance = cobradosCount - baseVideos;
+
+  if (typeof context.extraVideoCount === 'number') {
+    extraToPayThisMonth = context.extraVideoCount;
+    if (typeof context.balance === 'number') balance = context.balance;
+  } else if (context.cumulativeState) {
+    const bal = context.cumulativeState;
+    if (config.compensate) {
+      bal.done = (bal.done || 0) + cobradosCount;
+      bal.base = (bal.base || 0) + baseVideos;
+      const cumOverage = Math.max(0, bal.done - bal.base);
+      extraToPayThisMonth = Math.max(0, cumOverage - (bal.extraPaid || 0));
+      bal.extraPaid = (bal.extraPaid || 0) + extraToPayThisMonth;
+      balance = bal.done - bal.base;
+    } else {
+      extraToPayThisMonth = Math.max(0, cobradosCount - baseVideos);
+      balance = cobradosCount - baseVideos;
+    }
+  } else if (config.compensate && Array.isArray(context.allClientMonths) && Array.isArray(context.allClientVideos)) {
+    let cumDone = 0;
+    let cumBase = 0;
+    let prevExtraPaid = 0;
+
+    for (let i = 0; i < context.allClientMonths.length; i++) {
+      const cm = context.allClientMonths[i];
+      const cmCobrados = context.allClientVideos.filter(v => v.monthId === cm.id && isVideoCobrado(v) && v.tipo_item !== 'outros').length;
+      const cmBase = parseFloat(cm.base_videos) || 0;
+      if (cm.compensate) {
+        cumDone += cmCobrados;
+        cumBase += cmBase;
+        const cumOverage = Math.max(0, cumDone - cumBase);
+        const extraThisMonth = Math.max(0, cumOverage - prevExtraPaid);
+        if (cm.id === config.id) {
+          extraToPayThisMonth = extraThisMonth;
+          balance = cumDone - cumBase;
+          break;
+        }
+        prevExtraPaid += extraThisMonth;
+      } else {
+        if (cm.id === config.id) {
+          extraToPayThisMonth = Math.max(0, cmCobrados - cmBase);
+          balance = cmCobrados - cmBase;
+          break;
+        }
+      }
+    }
+  } else {
+    extraToPayThisMonth = Math.max(0, cobradosCount - baseVideos);
+    balance = cobradosCount - baseVideos;
+  }
+
+  const extraAmount = extraToPayThisMonth * ppv;
+  const total = base + extraAmount + bonus + outrosEarnings;
+
+  return {
+    mode: 'per_video',
+    basePayment: base,
+    billableVideoCount: cobradosCount,
+    billableMinutes: billableMinutes,
+    includedMinutes: targetTotalMin,
+    extraVideoCount: extraToPayThisMonth,
+    extraMinutes: Math.max(0, billableMinutes - targetTotalMin),
+    extraUnits: extraToPayThisMonth,
+    extraAmount: extraAmount,
+    bonus: bonus,
+    outrosAmount: outrosEarnings,
+    total: total,
+    balance: balance
+  };
+}
+
+/**
+ * Cálculo Financeiro: Novo Modelo / Franquia de Minutos (minute_overage)
+ */
+function calculateMinuteBilling(config, videos, context) {
+  config = config || {};
+  videos = Array.isArray(videos) ? videos : [];
+
+  let base = parseFloat(config.base_payment);
+  if (isNaN(base)) base = 600;
+
+  let baseVideos = parseFloat(config.base_videos);
+  if (isNaN(baseVideos)) baseVideos = 15;
+
+  let targetVideoMin = parseFloat(config.target_video_min);
+  if (isNaN(targetVideoMin) || targetVideoMin <= 0) targetVideoMin = 15;
+
+  let targetTotalMinutes = parseFloat(config.target_total_minutes);
+  if (isNaN(targetTotalMinutes) || targetTotalMinutes <= 0) {
+    targetTotalMinutes = targetVideoMin * baseVideos;
+  }
+
+  let extraMinuteBlock = parseFloat(config.extra_minute_block);
+  if (isNaN(extraMinuteBlock) || extraMinuteBlock <= 0) extraMinuteBlock = 15;
+
+  let extraMinutePrice = parseFloat(config.extra_minute_price);
+  if (isNaN(extraMinutePrice)) extraMinutePrice = 40;
+
+  const extraMinuteRounding = config.extra_minute_rounding || 'proportional';
+
+  let bonus = parseFloat(config.bonus);
+  if (isNaN(bonus)) bonus = 0;
+
+  const outrosItems = videos.filter(v => isVideoCobrado(v) && v.tipo_item === 'outros');
+  const outrosEarnings = outrosItems.reduce((s, v) => s + (parseFloat(v.valor_individual) || 0), 0);
+
+  const normalVideos = videos.filter(v => isVideoCobrado(v) && v.tipo_item !== 'outros');
+  const cobradosCount = normalVideos.length;
+
+  const billableMinutes = normalVideos.reduce((sum, v) => {
+    const sec = parseDurationSec(v.tempo);
+    return sum + (sec > 0 ? sec / 60 : 0);
+  }, 0);
+
+  const extraMinutes = Math.max(0, billableMinutes - targetTotalMinutes);
+
+  let extraUnits = 0;
+  let extraAmount = 0;
+
+  if (extraMinutes > 0) {
+    if (extraMinuteRounding === 'ceil_blocks') {
+      extraUnits = Math.ceil(extraMinutes / extraMinuteBlock);
+      extraAmount = extraUnits * extraMinutePrice;
+    } else {
+      // 'proportional' (padrão)
+      extraUnits = extraMinutes / extraMinuteBlock;
+      extraAmount = extraUnits * extraMinutePrice;
+    }
+  }
+
+  const total = base + extraAmount + bonus + outrosEarnings;
+
+  return {
+    mode: 'minute_overage',
+    basePayment: base,
+    billableVideoCount: cobradosCount,
+    billableMinutes: billableMinutes,
+    includedMinutes: targetTotalMinutes,
+    extraVideoCount: 0,
+    extraMinutes: extraMinutes,
+    extraUnits: extraUnits,
+    extraAmount: extraAmount,
+    bonus: bonus,
+    outrosAmount: outrosEarnings,
+    total: total,
+    balance: cobradosCount - baseVideos
+  };
+}
+
+/**
+ * Função Centralizada de Cálculo de Cobrança Mensal.
+ * Ramifica explicitamente pelo modelo: 'minute_overage' vs 'per_video' (legacy).
+ */
+function calculateMonthlyBilling(config, videos, context) {
+  config = config || {};
+  const mode = config.billing_mode === 'minute_overage' ? 'minute_overage' : 'per_video';
+
+  if (mode === 'minute_overage') {
+    return calculateMinuteBilling(config, videos, context);
+  }
+
+  return calculatePerVideoBilling(config, videos, context);
+}
+
 /**
  * Groups videos by criteria and calculates accurate earnings based on monthly configs.
  */
@@ -166,62 +371,17 @@ function groupData(videos, configs, timeframe) {
           };
         }
 
-        const bal = clientBalances[cid];
+        const billingResult = calculateMonthlyBilling(config, mVideos, {
+          cumulativeState: clientBalances[cid]
+        });
 
-        let ppv = parseFloat(config.price_per_video);
-        if (isNaN(ppv)) ppv = 40;
-
-        let base = parseFloat(config.base_payment);
-        if (isNaN(base)) base = 500;
-
-        let baseVideos = parseFloat(config.base_videos);
-        if (isNaN(baseVideos)) baseVideos = 15;
-
-        let bonus = parseFloat(config.bonus);
-        if (isNaN(bonus)) bonus = 0;
-
-        const isCobrado = v => v.feito && v.cobrado !== false;
-
-        const outrosEarnings = mVideos
-          .filter(v => isCobrado(v) && v.tipo_item === 'outros')
-          .reduce((s, v) => s + (parseFloat(v.valor_individual) || 0), 0);
-
-        const mVideosCobradosNormal = mVideos.filter(
-          v => isCobrado(v) && v.tipo_item !== 'outros'
-        ).length;
-
-        if (config.compensate) {
-          bal.done += mVideosCobradosNormal;
-          bal.base += baseVideos;
-
-          const cumOverage = Math.max(0, bal.done - bal.base);
-          const extraToPayThisMonth = Math.max(0, cumOverage - bal.extraPaid);
-          
-          groupEarnings +=
-            base +
-            extraToPayThisMonth * ppv +
-            bonus +
-            outrosEarnings;
-
-          bal.extraPaid += extraToPayThisMonth;
-        } else {
-          const extraToPayThisMonth = Math.max(
-            0,
-            mVideosCobradosNormal - baseVideos
-          );
-
-          groupEarnings +=
-            base +
-            extraToPayThisMonth * ppv +
-            bonus +
-            outrosEarnings;
-        }
+        groupEarnings += billingResult.total;
       } else {
-        groupEarnings += mVideos.filter(
-          v => v.feito &&
-            v.cobrado !== false &&
-            v.tipo_item !== 'outros'
-        ).length * 40;
+        const billingResult = calculateMonthlyBilling(
+          { billing_mode: 'per_video', base_payment: 0, price_per_video: 40, base_videos: 0 },
+          mVideos
+        );
+        groupEarnings += billingResult.total;
       }
     });
 
@@ -2336,7 +2496,7 @@ function getMinuteAnalytics(videos, configs, targetMinPerVid, targetBaseVideos, 
 /**
  * Renders the Minute Impact Card & Proof by A + B in the client dashboard.
  */
-function renderMinuteImpactSection(containerId, minuteData) {
+function renderMinuteImpactSection(containerId, minuteData, billingData) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
@@ -2447,6 +2607,51 @@ function renderMinuteImpactSection(containerId, minuteData) {
           4. <b>Impacto em Esforço:</b> Seu tempo de trabalho líquido dedicado à produção foi de <b>${recentAvgWorkHours.toFixed(1)}h</b> (${extraWorkHours > 0 ? '+' + extraWorkHours.toFixed(1) + ' horas extras de dublagem' : 'sem variação'}).
         </div>
       </div>
+
+      ${(billingData && billingData.mode === 'minute_overage') ? `
+      <div style="background:rgba(16, 185, 129, 0.06); border:1px solid rgba(16, 185, 129, 0.25); border-radius:10px; padding:15px; margin-top:15px">
+        <h4 style="margin:0 0 10px 0; font-size:12px; color:#34d399; text-transform:uppercase; letter-spacing:0.05em">💰 Demonstrativo Financeiro • Franquia de Minutos</h4>
+        <div class="stats-grid" style="grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:10px">
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Franquia Mensal</span>
+            <div style="font-size:16px; font-weight:700; color:#fff; margin-top:2px">${billingData.includedMinutes} min</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Minutos Faturáveis</span>
+            <div style="font-size:16px; font-weight:700; color:#fff; margin-top:2px">${billingData.billableMinutes.toFixed(1)} min</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Minutos Excedentes</span>
+            <div style="font-size:16px; font-weight:700; color:${billingData.extraMinutes > 0 ? '#ef4444' : '#10b981'}; margin-top:2px">${billingData.extraMinutes > 0 ? '+' : ''}${billingData.extraMinutes.toFixed(1)} min</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Equiv. em Blocos</span>
+            <div style="font-size:16px; font-weight:700; color:var(--accent); margin-top:2px">${billingData.extraUnits.toFixed(2)} blocos</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Valor do Excedente</span>
+            <div style="font-size:16px; font-weight:700; color:#f59e0b; margin-top:2px">R$ ${billingData.extraAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Pagamento Base</span>
+            <div style="font-size:16px; font-weight:700; color:#fff; margin-top:2px">R$ ${billingData.basePayment.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</div>
+          </div>
+          ${billingData.bonus > 0 ? `
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Bônus</span>
+            <div style="font-size:16px; font-weight:700; color:#10b981; margin-top:2px">R$ ${billingData.bonus.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</div>
+          </div>` : ''}
+          ${billingData.outrosAmount > 0 ? `
+          <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px">
+            <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase">Outros / Tarefas</span>
+            <div style="font-size:16px; font-weight:700; color:#10b981; margin-top:2px">R$ ${billingData.outrosAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</div>
+          </div>` : ''}
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.1); padding-top:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
+          <span style="font-size:12px; color:var(--text-dim)">Excedente: R$ ${billingData.extraAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})} + Base R$ ${billingData.basePayment.toLocaleString('pt-BR', {minimumFractionDigits: 2})}${billingData.bonus > 0 ? ' + Bônus R$ ' + billingData.bonus.toFixed(2) : ''}${billingData.outrosAmount > 0 ? ' + Outros R$ ' + billingData.outrosAmount.toFixed(2) : ''}</span>
+          <div style="font-size:14px; font-weight:700; color:#fff">Total Faturável: <span style="font-size:20px; font-weight:800; color:#10b981; margin-left:6px">R$ ${billingData.total.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span></div>
+        </div>
+      </div>` : ''}
     </div>
   `;
 
@@ -2548,22 +2753,24 @@ function exportMinuteImpactPDF(client, videos, minuteData) {
 
     y += 5;
     const tableBody = (minuteData.monthlyBreakdown || []).map(m => [
-      toSafePDF(m.label),
-      m.count + ' vids',
-      m.avgVideoMin.toFixed(1) + ' min',
-      m.videoMin.toFixed(0) + ' min',
-      m.equivalentVideos.toFixed(1) + ' vids',
-      m.workHours.toFixed(1) + ' hrs'
+      m.label,
+      `${m.count} vids`,
+      `${m.avgVideoMin.toFixed(1)} min`,
+      m.durationOverPct > 0 ? `+${m.durationOverPct.toFixed(1)}%` : 'meta ok',
+      `${m.videoMin.toFixed(0)} min`,
+      m.surplusMin > 0 ? `+${m.surplusMin.toFixed(0)} min` : '0 min',
+      `${m.workHours.toFixed(1)}h`
     ]);
 
-    if (doc.autoTable) {
+    if (window.jspdf && doc.autoTable) {
       doc.autoTable({
         startY: y,
-        head: [['Mes', 'Videos', 'Duracao Media', 'Total Minutos', 'Videos Equiv.', 'Horas Esforco']],
+        head: [['MES', 'VIDS', 'DURACAO MED.', 'DURACAO VS META', 'VOL. TOTAL', 'EXCEDENTE', 'ESFORCO (H)']],
         body: tableBody,
-        styles: { fillColor: [15, 23, 42], textColor: [226, 232, 240], fontSize: 9 },
-        headStyles: { fillColor: [30, 41, 59], textColor: [245, 158, 11], fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [21, 28, 41] },
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: [245, 158, 11], fontStyle: 'bold', fontSize: 8.5 },
+        bodyStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontSize: 8 },
+        alternateRowStyles: { fillColor: [20, 29, 47] },
         margin: { left: 15, right: 15 }
       });
     }
@@ -2576,14 +2783,14 @@ function exportMinuteImpactPDF(client, videos, minuteData) {
       doc.text(toSafePDF(`DubAnalytics - Gerado em ${new Date().toLocaleDateString('pt-BR')} - Pagina ${i} de ${pageCount}`), 15, H - 10);
     }
 
-    doc.save(`Relatorio_Impacto_Minutos_${(client.name || 'Cliente').replace(/\s+/g, '_')}.pdf`);
+    doc.save(`Dossie_Impacto_Minutos_${client.name.replace(/\s+/g, '_')}.pdf`);
   } catch (err) {
     console.error('Erro ao gerar PDF de minutos:', err);
     alert('Erro ao gerar PDF: ' + err.message);
   }
 }
 
-window.Analytics = {
+const Analytics = {
   groupData,
   renderCharts,
   renderAdvancedCharts,
@@ -2610,5 +2817,25 @@ window.Analytics = {
 
   getMinuteAnalytics,
   renderMinuteImpactSection,
-  exportMinuteImpactPDF
+  exportMinuteImpactPDF,
+
+  calculateMonthlyBilling,
+  calculatePerVideoBilling,
+  calculateMinuteBilling,
+  parseDurationSec
+};
+
+if (typeof window !== 'undefined') {
+  window.Analytics = Analytics;
+}
+if (typeof globalThis !== 'undefined') {
+  globalThis.Analytics = Analytics;
+}
+
+export {
+  calculateMonthlyBilling,
+  calculatePerVideoBilling,
+  calculateMinuteBilling,
+  parseDurationSec,
+  Analytics
 };

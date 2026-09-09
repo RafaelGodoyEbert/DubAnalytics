@@ -169,16 +169,36 @@ async function parseExcelFile(file, clientName) {
           id: monthId,
           clientId: clientId,
           label: String(monthLabel).replace(/&/g, ''),
+          billing_mode: 'per_video',
           price_per_video: pricePerVideo,
           base_payment: basePay,
           base_videos: baseVideos,
           bonus: bonus,
-          compensate: compensate
+          compensate: compensate,
+          target_video_min: 15,
+          target_total_minutes: 225,
+          extra_minute_block: 15,
+          extra_minute_price: 40,
+          extra_minute_rounding: 'proportional'
         });
       });
 
       resolve({
-        client: { id: clientId, name: clientName },
+        client: {
+          id: clientId,
+          name: clientName,
+          default_billing_mode: 'per_video',
+          default_ppv: pricePerVideo,
+          default_base: basePay,
+          default_bvid: baseVideos,
+          default_bonus: bonus,
+          default_comp: compensate,
+          default_target_video_min: 15,
+          default_target_total_minutes: 225,
+          default_extra_minute_block: 15,
+          default_extra_minute_price: 40,
+          default_extra_minute_rounding: 'proportional'
+        },
         configs: monthlyData,
         videos: videoRecords
       });

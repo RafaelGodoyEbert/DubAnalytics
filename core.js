@@ -133,6 +133,7 @@ window.loadStateFromDB = async function() {
     c.id = String(c.id);
     if (c.active === undefined) c.active = true;
     if (c.simples === undefined) c.simples = false;
+    if (c.default_billing_mode === undefined) c.default_billing_mode = 'per_video';
     if (c.default_ppv === undefined) c.default_ppv = 40;
     if (c.default_base === undefined) c.default_base = 500;
     if (c.default_bvid === undefined) c.default_bvid = 15;
@@ -140,15 +141,30 @@ window.loadStateFromDB = async function() {
     if (c.default_comp === undefined) c.default_comp = false;
     if (c.default_target_video_min === undefined) c.default_target_video_min = 15;
     if (c.default_target_total_minutes === undefined) c.default_target_total_minutes = (c.default_target_video_min * c.default_bvid);
+    if (c.default_extra_minute_block === undefined) c.default_extra_minute_block = 15;
+    if (c.default_extra_minute_price === undefined) c.default_extra_minute_price = 40;
+    if (c.default_extra_minute_rounding === undefined) c.default_extra_minute_rounding = 'proportional';
   });
 
   State.monthlyConfigs.forEach(m => {
     var parentC = State.clients.find(c => c.id === m.clientId);
+    if (m.billing_mode === undefined) {
+      m.billing_mode = 'per_video';
+    }
     if (m.target_video_min === undefined) {
       m.target_video_min = parentC && parentC.default_target_video_min !== undefined ? parentC.default_target_video_min : 15;
     }
     if (m.target_total_minutes === undefined) {
       m.target_total_minutes = parentC && parentC.default_target_total_minutes !== undefined ? parentC.default_target_total_minutes : (m.target_video_min * (m.base_videos || 15));
+    }
+    if (m.extra_minute_block === undefined) {
+      m.extra_minute_block = parentC && parentC.default_extra_minute_block !== undefined ? parentC.default_extra_minute_block : 15;
+    }
+    if (m.extra_minute_price === undefined) {
+      m.extra_minute_price = parentC && parentC.default_extra_minute_price !== undefined ? parentC.default_extra_minute_price : 40;
+    }
+    if (m.extra_minute_rounding === undefined) {
+      m.extra_minute_rounding = parentC && parentC.default_extra_minute_rounding !== undefined ? parentC.default_extra_minute_rounding : 'proportional';
     }
   });
   
@@ -405,6 +421,65 @@ function getClientMonthsSorted(clientId) {
     .sort(function(a, b) { return ExcelParser.sortMonthLabelDesc(a.label, b.label); });
 }
 
+function getMonthYear(label) {
+  var parts = (label || '').trim().split(' ');
+  return parts.length >= 2 ? parts[1] : (label.match(/\b(20\d\d|19\d\d)\b/) ? label.match(/\b(20\d\d|19\d\d)\b/)[0] : 'Outros');
+}
+
+function isYearGroupOpen(clientId, year, availableYears) {
+  if (!State.yearAccordion) State.yearAccordion = {};
+  var key = clientId + '_' + year;
+  if (typeof State.yearAccordion[key] === 'boolean') {
+    return State.yearAccordion[key];
+  }
+  
+  // Ano atual do calendário (ex: "2026")
+  var currentYear = String(new Date().getFullYear());
+  var hasCurrentYear = availableYears.indexOf(currentYear) >= 0;
+  
+  // Se o ano atual estiver presente na lista, abre ele; senão abre o ano mais recente (primeiro)
+  var isDefaultOpen = hasCurrentYear ? (year === currentYear) : (year === availableYears[0]);
+  
+  // Se o mês selecionado estiver neste ano, também abre para que o mês ativo fique visível
+  if (State.selectedMonth) {
+    var selYear = getMonthYear(State.selectedMonth.label);
+    if (selYear === year) return true;
+  }
+  
+  return isDefaultOpen;
+}
+
+window.toggleYearGroup = function(year) {
+  if (!State.selectedClient) return;
+  if (!State.yearAccordion) State.yearAccordion = {};
+  var cid = State.selectedClient.id;
+  var key = cid + '_' + year;
+  
+  var clientMonths = getClientMonthsSorted(cid);
+  var availableYears = [];
+  clientMonths.forEach(function(m) {
+    var y = getMonthYear(m.label);
+    if (availableYears.indexOf(y) === -1) availableYears.push(y);
+  });
+  
+  var currentlyOpen = isYearGroupOpen(cid, year, availableYears);
+  State.yearAccordion[key] = !currentlyOpen;
+  
+  var groupEl = document.getElementById('year-items-' + year);
+  var headerEl = document.getElementById('year-header-' + year);
+  if (groupEl && headerEl) {
+    if (!currentlyOpen) {
+      groupEl.style.display = '';
+      headerEl.classList.add('open');
+    } else {
+      groupEl.style.display = 'none';
+      headerEl.classList.remove('open');
+    }
+  } else {
+    renderClientWorkspace();
+  }
+};
+
 function renderClientWorkspace() {
   if (!State.selectedClient) return;
   document.getElementById('client-title').innerText = State.selectedClient.name;
@@ -413,10 +488,40 @@ function renderClientWorkspace() {
   var monthList = document.getElementById('month-list');
   var html = '<div class="month-item' + (State.clientSubView === 'overview' ? ' active' : '') + '" onclick="showClientOverview()" style="font-weight:700; color:var(--accent)">📊 Visão Geral</div>';
   html += '<div class="month-item' + (State.clientSubView === 'benchmarks' ? ' active' : '') + '" onclick="showBenchmarks()" style="font-weight:700; color:#6366f1">🎯 Benchmarks</div>';
-  html += clientMonths.map(function(m) {
-    var isActive = State.selectedMonth && State.selectedMonth.id === m.id;
-    return '<div class="month-item' + (isActive ? ' active' : '') + '" onclick="selectMonth(\'' + m.id + '\')">' + m.label + '</div>';
-  }).join('');
+  
+  // Agrupar meses por ano
+  var monthsByYear = {};
+  var yearOrder = [];
+  clientMonths.forEach(function(m) {
+    var y = getMonthYear(m.label);
+    if (!monthsByYear[y]) {
+      monthsByYear[y] = [];
+      yearOrder.push(y);
+    }
+    monthsByYear[y].push(m);
+  });
+
+  yearOrder.forEach(function(year) {
+    var months = monthsByYear[year];
+    var isOpen = isYearGroupOpen(State.selectedClient.id, year, yearOrder);
+    
+    html += '<div class="month-year-group" data-year="' + year + '">';
+    html += '  <div class="month-year-header' + (isOpen ? ' open' : '') + '" id="year-header-' + year + '" onclick="toggleYearGroup(\'' + year + '\')" title="Expandir/recolher ' + year + '">';
+    html += '    <div class="month-year-title">';
+    html += '      <span class="month-year-arrow">▶</span>';
+    html += '      <span>' + year + '</span>';
+    html += '    </div>';
+    html += '    <span class="month-year-badge">' + months.length + '</span>';
+    html += '  </div>';
+    html += '  <div class="month-year-items" id="year-items-' + year + '" style="' + (isOpen ? '' : 'display:none;') + '">';
+    html += months.map(function(m) {
+      var isActive = State.selectedMonth && State.selectedMonth.id === m.id;
+      return '<div class="month-item' + (isActive ? ' active' : '') + '" onclick="selectMonth(\'' + m.id + '\')">' + m.label + '</div>';
+    }).join('');
+    html += '  </div>';
+    html += '</div>';
+  });
+
   monthList.innerHTML = html;
 
   var overviewEl = document.getElementById('client-overview-section');
@@ -458,8 +563,13 @@ window.showClientOverview = function() {
 window.selectMonth = function(id) {
   State.selectedMonth = State.monthlyConfigs.find(function(m) { return m.id === id; });
   State.clientSubView = 'month';
-  // On mobile, if we are in the months list, we might want to scroll to content or close some drawer
-  // For now, renderClientWorkspace handles display
+  if (State.selectedMonth && State.selectedClient) {
+    var y = getMonthYear(State.selectedMonth.label);
+    if (y) {
+      if (!State.yearAccordion) State.yearAccordion = {};
+      State.yearAccordion[State.selectedClient.id + '_' + y] = true;
+    }
+  }
   renderClientWorkspace();
   
   // Scroll to top of content on mobile
@@ -697,14 +807,22 @@ function renderMonthDetails() {
   document.getElementById('month-label').innerText = (m.label || '').replace(/&/g, '').trim();
   document.getElementById('month-period').innerText = (m.periodo || '').replace(/&/g, '').trim();
   
+  var mode = m.billing_mode === 'minute_overage' ? 'minute_overage' : 'per_video';
+  var isMinuteOverage = (mode === 'minute_overage');
+  
+  var billingModeEl = document.getElementById('cfg-billing-mode');
+  if (billingModeEl) billingModeEl.value = mode;
+
   var ppvVal = parseFloat(m.price_per_video);
   document.getElementById('cfg-ppv').value = isNaN(ppvVal) ? 40 : ppvVal;
   
   var baseVal = parseFloat(m.base_payment);
-  document.getElementById('cfg-base').value = isNaN(baseVal) ? 500 : baseVal;
+  document.getElementById('cfg-base').value = isNaN(baseVal) ? (isMinuteOverage ? 600 : 500) : baseVal;
   
   var bvidVal = parseFloat(m.base_videos);
   document.getElementById('cfg-bvid').value = isNaN(bvidVal) ? 15 : bvidVal;
+  var bvidLabel = document.getElementById('cfg-bvid-label');
+  if (bvidLabel) bvidLabel.innerText = isMinuteOverage ? 'Vídeos Previstos:' : 'Base Vídeos:';
   
   var bonusVal = parseFloat(m.bonus);
   document.getElementById('cfg-bonus').value = isNaN(bonusVal) ? 0 : bonusVal;
@@ -715,7 +833,51 @@ function renderMonthDetails() {
   var targetMinEl = document.getElementById('cfg-target-min');
   if (targetMinEl) targetMinEl.value = isNaN(targetMinVal) || targetMinVal === 0 ? 15 : targetMinVal;
 
+  var targetTotalMinVal = (m.target_total_minutes !== undefined && m.target_total_minutes !== null && m.target_total_minutes !== '')
+    ? parseFloat(m.target_total_minutes)
+    : (targetMinVal * (parseFloat(m.base_videos) || 15));
+  var targetTotalMinEl = document.getElementById('cfg-target-total-min');
+  if (targetTotalMinEl) targetTotalMinEl.value = isNaN(targetTotalMinVal) || targetTotalMinVal === 0 ? (targetMinVal * (parseFloat(m.base_videos) || 15)) : targetTotalMinVal;
+  var targetTotalLabel = document.getElementById('cfg-target-total-min-label');
+  if (targetTotalLabel) targetTotalLabel.innerText = isMinuteOverage ? 'Franquia Min/Mês:' : 'Meta Min/Mês:';
+
+  var extraPriceEl = document.getElementById('cfg-extra-min-price');
+  if (extraPriceEl) {
+    var epVal = parseFloat(m.extra_minute_price);
+    extraPriceEl.value = isNaN(epVal) ? 40 : epVal;
+  }
+  var extraBlockEl = document.getElementById('cfg-extra-min-block');
+  if (extraBlockEl) {
+    var ebVal = parseFloat(m.extra_minute_block);
+    extraBlockEl.value = isNaN(ebVal) ? 15 : ebVal;
+  }
+  var extraRoundingEl = document.getElementById('cfg-extra-min-rounding');
+  if (extraRoundingEl) {
+    extraRoundingEl.value = m.extra_minute_rounding || 'proportional';
+  }
+
   document.getElementById('cfg-comp').checked = m.compensate || false;
+
+  // Alterna a visibilidade dos campos no config bar
+  var itemPpv = document.getElementById('cfg-item-ppv');
+  var itemComp = document.getElementById('cfg-item-comp');
+  var itemExtraPrice = document.getElementById('cfg-item-extra-price');
+  var itemExtraBlock = document.getElementById('cfg-item-extra-block');
+  var itemExtraRounding = document.getElementById('cfg-item-extra-rounding');
+
+  if (isMinuteOverage) {
+    if (itemPpv) itemPpv.style.display = 'none';
+    if (itemComp) itemComp.style.display = 'none';
+    if (itemExtraPrice) itemExtraPrice.style.display = 'flex';
+    if (itemExtraBlock) itemExtraBlock.style.display = 'flex';
+    if (itemExtraRounding) itemExtraRounding.style.display = 'flex';
+  } else {
+    if (itemPpv) itemPpv.style.display = 'flex';
+    if (itemComp) itemComp.style.display = 'flex';
+    if (itemExtraPrice) itemExtraPrice.style.display = 'none';
+    if (itemExtraBlock) itemExtraBlock.style.display = 'none';
+    if (itemExtraRounding) itemExtraRounding.style.display = 'none';
+  }
 
   var mVideos = State.videos.filter(function(v) { return v.monthId === m.id; });
   mVideos.sort(function(a, b) { return (a.rowIndex || 0) - (b.rowIndex || 0); });
@@ -745,44 +907,61 @@ function renderMonthDetails() {
     }
   });
 
-  // Compensation Logic — usa cobrado (não só feito)
-  var isCompensated = m.compensate === true;
-  var clientMonths = getClientMonthsSorted(State.selectedClient.id).reverse();
-  var cumDone = 0;
-  var cumBase = 0;
-  var prevExtraPaid = 0;
-  var currentMonthExtra = 0;
-  var currentBalance = 0;
+  // Cálculo Financeiro Centralizado
+  var clientMonthsChronological = getClientMonthsSorted(State.selectedClient.id).reverse();
+  var billing = Analytics.calculateMonthlyBilling(m, mVideos, {
+    allClientMonths: clientMonthsChronological,
+    allClientVideos: State.videos
+  });
 
-  for (var i = 0; i < clientMonths.length; i++) {
-    var cm = clientMonths[i];
-    var cmCobrados = State.videos.filter(function(v) { return v.monthId === cm.id && isCobrado(v) && v.tipo_item !== 'outros'; }).length;
-    var cmBase = parseFloat(cm.base_videos) || 0;
-    if (cm.compensate) {
-      cumDone += cmCobrados;
-      cumBase += cmBase;
-      var cumOverage = Math.max(0, cumDone - cumBase);
-      var extraThisMonth = Math.max(0, cumOverage - prevExtraPaid);
-      if (cm.id === m.id) { currentMonthExtra = extraThisMonth; currentBalance = cumDone - cumBase; break; }
-      prevExtraPaid += extraThisMonth;
-    } else {
-      if (cm.id === m.id) { currentMonthExtra = Math.max(0, cmCobrados - cmBase); currentBalance = cmCobrados - cmBase; break; }
+  var earnings = billing.total;
+  var currentBalance = billing.balance;
+
+  // Alterna exibição dos cards
+  var isCompensated = !isMinuteOverage && m.compensate === true;
+  var balCard = document.getElementById('m-stat-card-balance');
+  if (balCard) balCard.style.display = isCompensated ? 'block' : 'none';
+
+  var franchiseCard = document.getElementById('m-stat-card-franchise');
+  var billableMinCard = document.getElementById('m-stat-card-billable-min');
+  var overageMinCard = document.getElementById('m-stat-card-overage-min');
+  var overagePayCard = document.getElementById('m-stat-card-overage-pay');
+  var blocksCard = document.getElementById('m-stat-card-blocks');
+  var payLabel = document.getElementById('m-stat-pay-label');
+
+  if (isMinuteOverage) {
+    if (payLabel) payLabel.innerText = 'PAGAMENTO';
+    if (franchiseCard) {
+      franchiseCard.style.display = 'block';
+      document.getElementById('m-stat-franchise').innerHTML = billing.includedMinutes + '<span class="stat-unit">min</span>';
     }
+    if (billableMinCard) {
+      billableMinCard.style.display = 'block';
+      document.getElementById('m-stat-billable-min').innerHTML = billing.billableMinutes.toFixed(1) + '<span class="stat-unit">min</span>';
+    }
+    if (overageMinCard) {
+      overageMinCard.style.display = 'block';
+      var overageEl = document.getElementById('m-stat-overage-min');
+      overageEl.innerHTML = (billing.extraMinutes > 0 ? '+' : '') + billing.extraMinutes.toFixed(1) + '<span class="stat-unit">min</span>';
+      overageEl.className = 'stat-value ' + (billing.extraMinutes > 0 ? 'text-danger' : 'text-success');
+    }
+    if (overagePayCard) {
+      overagePayCard.style.display = 'block';
+      document.getElementById('m-stat-overage-pay').innerText = 'R$ ' + billing.extraAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+    if (blocksCard) {
+      blocksCard.style.display = 'block';
+      var blockStr = (billing.extraUnits || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '<span class="stat-unit">blocos (' + (m.extra_minute_block || 15) + 'm)</span>';
+      document.getElementById('m-stat-blocks').innerHTML = blockStr;
+    }
+  } else {
+    if (payLabel) payLabel.innerText = 'GANHO MÊS';
+    if (franchiseCard) franchiseCard.style.display = 'none';
+    if (billableMinCard) billableMinCard.style.display = 'none';
+    if (overageMinCard) overageMinCard.style.display = 'none';
+    if (overagePayCard) overagePayCard.style.display = 'none';
+    if (blocksCard) blocksCard.style.display = 'none';
   }
-
-  var balCard = document.getElementById('m-stat-balance').closest('.card');
-  balCard.style.display = isCompensated ? 'block' : 'none';
-
-  var ppv = parseFloat(m.price_per_video); if (isNaN(ppv)) ppv = 40;
-  var basePay = parseFloat(m.base_payment); if (isNaN(basePay)) basePay = 500;
-  var bonus = parseFloat(m.bonus); if (isNaN(bonus)) bonus = 0;
-
-  // Soma ganhos de itens "Outros" cobrados (feito=true, cobrado!=false)
-  var outrosEarnings = outrosItems
-    .filter(isCobrado)
-    .reduce(function(s, v) { return s + (parseFloat(v.valor_individual) || 0); }, 0);
-
-  var earnings = basePay + (currentMonthExtra * ppv) + bonus + outrosEarnings;
 
   // Stat: COBRADOS / ENTREGUES / TOTAL
   var statDoneEl = document.getElementById('m-stat-done');
@@ -796,35 +975,24 @@ function renderMonthDetails() {
   }
 
   var balEl = document.getElementById('m-stat-balance');
-  balEl.innerText = (currentBalance > 0 ? '+' : '') + currentBalance;
-  balEl.className = 'stat-value ' + (currentBalance < 0 ? 'text-danger' : currentBalance > 0 ? 'text-success' : '');
+  if (balEl) {
+    balEl.innerText = (currentBalance > 0 ? '+' : '') + currentBalance;
+    balEl.className = 'stat-value ' + (currentBalance < 0 ? 'text-danger' : currentBalance > 0 ? 'text-success' : '');
+  }
 
-  document.getElementById('m-stat-pay').innerText = 'R$ ' + earnings.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+  document.getElementById('m-stat-pay').innerText = 'R$ ' + earnings.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   var monthDays = (totalWorkSeconds / 86400).toFixed(1);
-  document.getElementById('m-stat-hours').innerHTML = ExcelParser.secondsToHMS(totalWorkSeconds) + '\n<span style="font-size:12px; font-weight:normal; color:var(--text-dim); margin-left:8px">(~' + monthDays + ' dias)</span>';
+  document.getElementById('m-stat-hours').innerHTML = ExcelParser.secondsToHMS(totalWorkSeconds) + '<span class="stat-unit">(~' + monthDays + 'd)</span>';
   document.getElementById('m-stat-ratio').innerText = (totalVideoSeconds > 0 ? (totalWorkSeconds / totalVideoSeconds).toFixed(2) : '0.0') + 'x';
 
   var statHoursCard = document.getElementById('m-stat-hours').closest('.card');
   if (statHoursCard) statHoursCard.classList.add('card-long-text');
 
   var perHour = totalWorkSeconds > 0 ? earnings / (totalWorkSeconds / 3600) : 0;
-  document.getElementById('m-stat-per-hour').innerText = 'R$ ' + perHour.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+  document.getElementById('m-stat-per-hour').innerText = 'R$ ' + perHour.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
   function parseDurSec(val) {
-    if (val === null || val === undefined || val === '') return 0;
-    if (typeof val === 'number') return isNaN(val) ? 0 : val;
-    if (typeof val === 'string') {
-      val = val.trim();
-      if (val.includes(':')) {
-        var parts = val.split(':').map(Number);
-        if (parts.some(isNaN)) return 0;
-        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-        if (parts.length === 2) return parts[0] * 60 + parts[1];
-      }
-      var num = parseFloat(val);
-      return isNaN(num) ? 0 : num;
-    }
-    return 0;
+    return Analytics.parseDurationSec ? Analytics.parseDurationSec(val) : 0;
   }
 
   // Estatísticas de Minutos e Equivalência do Mês
@@ -836,27 +1004,21 @@ function renderMonthDetails() {
 
   var avgMinEl = document.getElementById('m-stat-avg-min');
   if (avgMinEl) {
-    avgMinEl.innerText = monthAvgMin.toFixed(1) + ' min';
+    avgMinEl.innerHTML = monthAvgMin.toFixed(1) + '<span class="stat-unit">min</span>';
     avgMinEl.className = 'stat-value ' + (monthAvgMin > targetMinVal ? 'text-danger' : 'text-success');
   }
 
   var equivEl = document.getElementById('m-stat-equiv-vids');
   if (equivEl) {
-    equivEl.innerText = monthEquiv.toFixed(1) + ' vids';
+    equivEl.innerHTML = monthEquiv.toFixed(1) + '<span class="stat-unit">vids</span>';
   }
 
   // Renderiza o Card de Impacto por A + B no Mês Ativo (usando m.id)
-  var targetTotalMinVal = (m.target_total_minutes !== undefined && m.target_total_minutes !== null && m.target_total_minutes !== '')
-    ? parseFloat(m.target_total_minutes)
-    : (targetMinVal * (parseFloat(m.base_videos) || 15));
-  var targetTotalMinEl = document.getElementById('cfg-target-total-min');
-  if (targetTotalMinEl) targetTotalMinEl.value = isNaN(targetTotalMinVal) || targetTotalMinVal === 0 ? (targetMinVal * (parseFloat(m.base_videos) || 15)) : targetTotalMinVal;
-
   if (State.selectedClient) {
     var cVideos = State.videos.filter(function(v) { return v.clientId === State.selectedClient.id; });
     var cConfigs = State.monthlyConfigs.filter(function(cm) { return cm.clientId === State.selectedClient.id; });
     var monthMinuteData = Analytics.getMinuteAnalytics(cVideos, cConfigs, targetMinVal, parseFloat(m.base_videos) || 15, targetTotalMinVal, m.id);
-    Analytics.renderMinuteImpactSection('month-minute-section', monthMinuteData);
+    Analytics.renderMinuteImpactSection('month-minute-section', monthMinuteData, billing);
   }
 
   // Atualiza cabeçalho da tabela dinamicamente (simples vs full)
@@ -891,26 +1053,37 @@ function renderMonthDetails() {
           '</tr>';
       }
 
-      // Status de 3 estados
-      var stCls, stLabel, stTitle;
-      if (!v.feito)                  { stCls = 'bg-todo'; stLabel = '\u2717 Pendente';  stTitle = 'Clique: marcar Entregue'; }
-      else if (v.cobrado === false)   { stCls = 'bg-info'; stLabel = '\u2713 Entregue';  stTitle = 'Clique: marcar Cobrado'; }
-      else                           { stCls = 'bg-done'; stLabel = '\ud83d\udcb0 Cobrado';  stTitle = 'Clique: desmarcar'; }
+      // Status de 3 estados — dropdown para evitar double-click disparar 2 saves
+      var curState = !v.feito ? 'todo' : (v.cobrado === false ? 'info' : 'done');
+      var stCls    = curState === 'done' ? 'bg-done' : curState === 'info' ? 'bg-info' : 'bg-todo';
+      var stLabel  = curState === 'done' ? '💰 Cobrado' : curState === 'info' ? '✓ Entregue' : '✗ Pendente';
+      var statusBtn = '<div class="status-dropdown" id="sd-' + v.id + '">' +
+        '<button class="badge ' + stCls + '" onclick="toggleStatusDropdown(event,\'' + v.id + '\')">' + stLabel + ' ▾</button>' +
+        '<div class="status-menu">' +
+          '<button class="status-menu-item' + (curState==='todo'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'todo\')"><span class="status-dot" style="background:#ef4444"></span>✗ Pendente</button>' +
+          '<button class="status-menu-item' + (curState==='info'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'info\')"><span class="status-dot" style="background:#60a5fa"></span>✓ Entregue</button>' +
+          '<button class="status-menu-item' + (curState==='done'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'done\')"><span class="status-dot" style="background:#10b981"></span>💰 Cobrado</button>' +
+        '</div>' +
+      '</div>';
 
       var rowBg    = (v.feito && v.cobrado === false) ? 'rgba(96,165,250,0.05)' : (isBenchmark ? 'rgba(99,102,241,0.05)' : 'transparent');
       var rowBdr   = (v.feito && v.cobrado === false) ? '3px solid #60a5fa' : 'none';
       var rowStyle = 'style="background:' + rowBg + '; border-left:' + rowBdr + '"';
-      var statusBtn = '<button class="badge ' + stCls + '" onclick="cycleVideoStatus(\'' + v.id + '\')" title="' + stTitle + '">' + stLabel + '</button>';
 
-      var titleDiv = '<div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar este item">' +
-        (v.link ? '<a href="' + v.link + '" target="_blank" onclick="event.stopPropagation()" style="color:var(--accent); text-decoration:none">' + (v.titulo || '\u2013') + ' \ud83d\udd17</a>' : (v.titulo || '\u2013')) +
+      // Título: o link abre no clique do ícone 🔗 do lado do nome; clicar no nome abre modal de edição
+      var titleLink = v.link
+        ? ' <button class="btn-copy-link" id="cl-' + v.id + '" onclick="copyVideoLink(event,\'' + v.id + '\')" title="Copiar link">🔗</button>'
+        : '';
+      var titleDiv = '<div style="display:flex;align-items:center;gap:4px">' +
+        '<span style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar este item">' + (v.titulo || '–') + '</span>' +
+        titleLink +
         (isBenchmark ? ' <span class="badge bg-todo" style="font-size:9px">TESTE</span>' : '') +
         '</div>';
 
       var actions = '<td>' +
-        (v.link ? '<a href="' + v.link + '" target="_blank" class="btn-ghost" style="color:var(--accent);text-decoration:none;padding:5px;margin-right:5px" title="Abrir V\u00eddeo">\ud83d\udd17</a>' : '') +
-        '<button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> ' +
-        '<button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button>' +
+        (v.link ? '<a href="' + v.link + '" target="_blank" class="btn-ghost" style="color:var(--accent);text-decoration:none;padding:5px;margin-right:5px" title="Abrir Vídeo">🔗</a>' : '') +
+        '<button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">✎</button> ' +
+        '<button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">✕</button>' +
         '</td>';
 
       if (isSimples) {
@@ -976,27 +1149,79 @@ window.toggleVideoField = async function(videoId, field) {
   renderMonthDetails();
 };
 
-// Cicla entre: Pendente → Entregue (não cobrado) → Cobrado → Pendente
-window.cycleVideoStatus = async function(videoId) {
+// Abre/fecha o dropdown de status de um vídeo
+window.toggleStatusDropdown = function(event, videoId) {
+  event.stopPropagation();
+  var el = document.getElementById('sd-' + videoId);
+  if (!el) return;
+  var isOpen = el.classList.contains('open');
+  // Fecha todos os abertos
+  document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+  if (!isOpen) el.classList.add('open');
+};
+
+// Fecha dropdowns ao clicar fora
+document.addEventListener('click', function() {
+  document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+}, true);
+
+// Guard contra double-click — só faz o put uma vez por vídeo por vez
+var _statusSaving = {};
+
+// Define status diretamente (sem ciclo) — evita 2 clicks mandarem 3 requests
+window.setVideoStatus = async function(videoId, status) {
+  if (_statusSaving[videoId]) return;
+  _statusSaving[videoId] = true;
+  // Fecha dropdown
+  var el = document.getElementById('sd-' + videoId);
+  if (el) el.classList.remove('open');
+
   var v = State.videos.find(function(x) { return x.id === videoId; });
-  if (!v) return;
-  if (!v.feito) {
-    // Pendente → Entregue s/ cobrança
-    v.feito = true; v.cobrado = false;
-  } else if (v.cobrado === false) {
-    // Entregue → Cobrado
-    v.cobrado = true;
-  } else {
-    // Cobrado → Pendente
-    v.feito = false; v.cobrado = false;
-  }
+  if (!v) { _statusSaving[videoId] = false; return; }
+  if (status === 'todo')      { v.feito = false; v.cobrado = false; }
+  else if (status === 'info') { v.feito = true;  v.cobrado = false; }
+  else                        { v.feito = true;  v.cobrado = true;  }
   await DB.put('videos', v);
+  _statusSaving[videoId] = false;
   renderMonthDetails();
+};
+
+// Copia o link do vídeo para a área de transferência
+window.copyVideoLink = function(event, videoId) {
+  event.stopPropagation();
+  var v = State.videos.find(function(x) { return x.id === videoId; });
+  if (!v || !v.link) return;
+  var btn = document.getElementById('cl-' + videoId);
+  navigator.clipboard.writeText(v.link).then(function() {
+    if (btn) { btn.textContent = '✓'; btn.classList.add('copied'); }
+    setTimeout(function() {
+      if (btn) { btn.textContent = '🔗'; btn.classList.remove('copied'); }
+    }, 1500);
+  }).catch(function() {
+    // fallback
+    var ta = document.createElement('textarea');
+    ta.value = v.link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (btn) { btn.textContent = '✓'; btn.classList.add('copied'); }
+    setTimeout(function() {
+      if (btn) { btn.textContent = '🔗'; btn.classList.remove('copied'); }
+    }, 1500);
+  });
 };
 
 window.updateMonthConfig = async function(field, value) {
   if (!State.selectedMonth) return;
-  State.selectedMonth[field] = (typeof value === 'boolean') ? value : parseFloat(value);
+  if (typeof value === 'boolean') {
+    State.selectedMonth[field] = value;
+  } else if (field === 'billing_mode' || field === 'extra_minute_rounding') {
+    State.selectedMonth[field] = String(value);
+  } else {
+    var num = parseFloat(value);
+    State.selectedMonth[field] = isNaN(num) ? 0 : num;
+  }
   await DB.put('monthlyConfig', State.selectedMonth);
   renderMonthDetails();
 };
@@ -1050,6 +1275,9 @@ window.deleteMonth = async function(id) {
 /* ========== MODALS ========== */
 window.openClientModal = function(existingId) {
   var c = existingId ? State.clients.find(function(x) { return x.id === existingId; }) : null;
+  var currentMode = (c && c.default_billing_mode) ? c.default_billing_mode : 'per_video';
+  var isMinMode = (currentMode === 'minute_overage');
+
   showModal(
     '<h2>👤 ' + (c ? 'Editar' : 'Novo') + ' Cliente</h2>' +
     '<div class="form-group"><label>Nome do Cliente</label><input type="text" id="new-client-name" value="' + (c ? c.name : '') + '" placeholder="Ex: SanInPlay"></div>' +
@@ -1061,15 +1289,31 @@ window.openClientModal = function(existingId) {
       '</div>' +
     '</div>' +
     '<div style="margin-top:15px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px">' +
-      '<h3 style="font-size:12px; color:var(--accent); margin-bottom:10px">Configuração Padrão (Copida para novos meses)</h3>' +
+      '<h3 style="font-size:12px; color:var(--accent); margin-bottom:10px">Configuração Padrão (Copiada para novos meses)</h3>' +
       '<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px">' +
-        '<div class="form-group"><label>Preço / Vídeo</label><input type="number" id="new-client-ppv" value="' + (c && c.default_ppv !== undefined ? c.default_ppv : 40) + '"></div>' +
-        '<div class="form-group"><label>Base R$</label><input type="number" id="new-client-base" value="' + (c && c.default_base !== undefined ? c.default_base : 500) + '"></div>' +
-        '<div class="form-group"><label>Base Vídeos</label><input type="number" id="new-client-bvid" value="' + (c && c.default_bvid !== undefined ? c.default_bvid : 15) + '"></div>' +
+        '<div class="form-group" style="grid-column: span 2">' +
+          '<label>Modelo de Cobrança Padrão</label>' +
+          '<select id="new-client-billing-mode" onchange="window.toggleClientModalMode(this.value)">' +
+            '<option value="per_video"' + (!isMinMode ? ' selected' : '') + '>Por Vídeo (Legado)</option>' +
+            '<option value="minute_overage"' + (isMinMode ? ' selected' : '') + '>Franquia de Minutos</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="form-group"><label>Base R$</label><input type="number" id="new-client-base" value="' + (c && c.default_base !== undefined ? c.default_base : (isMinMode ? 600 : 500)) + '"></div>' +
+        '<div class="form-group"><label id="new-client-bvid-label">' + (isMinMode ? 'Vídeos Previstos' : 'Base Vídeos') + '</label><input type="number" id="new-client-bvid" value="' + (c && c.default_bvid !== undefined ? c.default_bvid : 15) + '"></div>' +
+        '<div class="form-group" id="client-ppv-group" style="' + (isMinMode ? 'display:none' : '') + '"><label>Preço / Vídeo Extra</label><input type="number" id="new-client-ppv" value="' + (c && c.default_ppv !== undefined ? c.default_ppv : 40) + '"></div>' +
         '<div class="form-group"><label>Minutos / Vídeo (Meta)</label><input type="number" id="new-client-target-min" value="' + (c && c.default_target_video_min !== undefined ? c.default_target_video_min : 15) + '"></div>' +
-        '<div class="form-group"><label>Franquia Minutos/Mês</label><input type="number" id="new-client-target-total-min" value="' + (c && c.default_target_total_minutes !== undefined ? c.default_target_total_minutes : 225) + '"></div>' +
+        '<div class="form-group"><label id="new-client-total-min-label">' + (isMinMode ? 'Franquia Minutos/Mês' : 'Meta Min/Mês') + '</label><input type="number" id="new-client-target-total-min" value="' + (c && c.default_target_total_minutes !== undefined ? c.default_target_total_minutes : 225) + '"></div>' +
+        '<div class="form-group" id="client-extra-price-group" style="' + (!isMinMode ? 'display:none' : '') + '"><label>Valor do Excedente R$</label><input type="number" id="new-client-extra-price" value="' + (c && c.default_extra_minute_price !== undefined ? c.default_extra_minute_price : 40) + '"></div>' +
+        '<div class="form-group" id="client-extra-block-group" style="' + (!isMinMode ? 'display:none' : '') + '"><label>Bloco de Minutos do Excedente</label><input type="number" id="new-client-extra-block" value="' + (c && c.default_extra_minute_block !== undefined ? c.default_extra_minute_block : 15) + '"></div>' +
+        '<div class="form-group" id="client-extra-rounding-group" style="' + (!isMinMode ? 'display:none' : '') + '">' +
+          '<label>Arredondamento do Excedente</label>' +
+          '<select id="new-client-extra-rounding">' +
+            '<option value="proportional"' + ((!c || c.default_extra_minute_rounding !== 'ceil_blocks') ? ' selected' : '') + '>Proporcional (Padrão)</option>' +
+            '<option value="ceil_blocks"' + ((c && c.default_extra_minute_rounding === 'ceil_blocks') ? ' selected' : '') + '>Blocos Inteiros</option>' +
+          '</select>' +
+        '</div>' +
         '<div class="form-group"><label>Bônus R$</label><input type="number" id="new-client-bonus" value="' + (c && c.default_bonus !== undefined ? c.default_bonus : 0) + '"></div>' +
-        '<div style="grid-column: span 2; display:flex; align-items:center; gap:8px">' +
+        '<div id="client-comp-group" style="grid-column: span 2; display:' + (isMinMode ? 'none' : 'flex') + '; align-items:center; gap:8px">' +
           '<input type="checkbox" id="new-client-comp" ' + (c && c.default_comp ? 'checked' : '') + ' style="width:16px; height:16px">' +
           '<label for="new-client-comp" style="font-size:11px; margin:0; cursor:pointer">Compensar saldo de vídeos (banco de vídeos)</label>' +
         '</div>' +
@@ -1082,19 +1326,43 @@ window.openClientModal = function(existingId) {
   );
 };
 
+window.toggleClientModalMode = function(mode) {
+  var isMin = (mode === 'minute_overage');
+  var ppvGrp = document.getElementById('client-ppv-group');
+  var compGrp = document.getElementById('client-comp-group');
+  var epGrp = document.getElementById('client-extra-price-group');
+  var ebGrp = document.getElementById('client-extra-block-group');
+  var erGrp = document.getElementById('client-extra-rounding-group');
+  var bvidLbl = document.getElementById('new-client-bvid-label');
+  var totalMinLbl = document.getElementById('new-client-total-min-label');
+
+  if (ppvGrp) ppvGrp.style.display = isMin ? 'none' : 'block';
+  if (compGrp) compGrp.style.display = isMin ? 'none' : 'flex';
+  if (epGrp) epGrp.style.display = isMin ? 'block' : 'none';
+  if (ebGrp) ebGrp.style.display = isMin ? 'block' : 'none';
+  if (erGrp) erGrp.style.display = isMin ? 'block' : 'none';
+  if (bvidLbl) bvidLbl.innerText = isMin ? 'Vídeos Previstos' : 'Base Vídeos';
+  if (totalMinLbl) totalMinLbl.innerText = isMin ? 'Franquia Minutos/Mês' : 'Meta Min/Mês';
+};
+
 window.saveClient = async function(existingId) {
   var name = document.getElementById('new-client-name').value.trim();
   if (!name) return;
   var simples = document.getElementById('new-client-simples') ? document.getElementById('new-client-simples').checked : false;
+  var mode = document.getElementById('new-client-billing-mode') ? document.getElementById('new-client-billing-mode').value : 'per_video';
   
   var defaults = {
+    default_billing_mode: mode,
     default_ppv: parseFloat(document.getElementById('new-client-ppv').value) || 0,
     default_base: parseFloat(document.getElementById('new-client-base').value) || 0,
     default_bvid: parseFloat(document.getElementById('new-client-bvid').value) || 15,
     default_target_video_min: parseFloat(document.getElementById('new-client-target-min').value) || 15,
     default_target_total_minutes: parseFloat(document.getElementById('new-client-target-total-min').value) || 0,
+    default_extra_minute_block: parseFloat(document.getElementById('new-client-extra-block').value) || 15,
+    default_extra_minute_price: parseFloat(document.getElementById('new-client-extra-price').value) || 40,
+    default_extra_minute_rounding: document.getElementById('new-client-extra-rounding') ? document.getElementById('new-client-extra-rounding').value : 'proportional',
     default_bonus: parseFloat(document.getElementById('new-client-bonus').value) || 0,
-    default_comp: document.getElementById('new-client-comp').checked
+    default_comp: document.getElementById('new-client-comp') ? document.getElementById('new-client-comp').checked : false
   };
   if (!defaults.default_target_total_minutes) {
     defaults.default_target_total_minutes = defaults.default_target_video_min * defaults.default_bvid;
@@ -1152,9 +1420,15 @@ window.saveMonthModal = async function(existingId) {
   var config = existingId ? State.monthlyConfigs.find(function(x) { return x.id === existingId; }) : { 
     id: mId, 
     clientId: State.selectedClient.id, 
-    price_per_video: cDef.default_ppv !== undefined ? cDef.default_ppv : 40, 
-    base_payment: cDef.default_base !== undefined ? cDef.default_base : 500, 
+    billing_mode: cDef.default_billing_mode || 'per_video', 
+    base_payment: cDef.default_base !== undefined ? cDef.default_base : (cDef.default_billing_mode === 'minute_overage' ? 600 : 500), 
     base_videos: cDef.default_bvid !== undefined ? cDef.default_bvid : 15, 
+    price_per_video: cDef.default_ppv !== undefined ? cDef.default_ppv : 40, 
+    target_video_min: cDef.default_target_video_min !== undefined ? cDef.default_target_video_min : 15,
+    target_total_minutes: cDef.default_target_total_minutes !== undefined ? cDef.default_target_total_minutes : 225,
+    extra_minute_block: cDef.default_extra_minute_block !== undefined ? cDef.default_extra_minute_block : 15,
+    extra_minute_price: cDef.default_extra_minute_price !== undefined ? cDef.default_extra_minute_price : 40,
+    extra_minute_rounding: cDef.default_extra_minute_rounding || 'proportional',
     bonus: cDef.default_bonus !== undefined ? cDef.default_bonus : 0, 
     compensate: cDef.default_comp !== undefined ? cDef.default_comp : false 
   };
