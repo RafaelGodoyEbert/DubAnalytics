@@ -190,6 +190,10 @@ window.refreshUI = function() {
     if (!exists) {
       showView('general');
     } else {
+      State.selectedClient = exists;
+      if (State.selectedMonth) {
+        State.selectedMonth = State.monthlyConfigs.find(m => m.id === State.selectedMonth.id) || null;
+      }
       renderClientWorkspace();
     }
   }
@@ -406,6 +410,8 @@ window.selectClient = function(id) {
   State.selectedClient = State.clients.find(function(c) { return c.id === id; });
   State.clientSubView = 'overview';
   State.selectedMonth = null;
+  var clientContainer = document.querySelector('#client-overview-section .container');
+  if (clientContainer) clientContainer.scrollTop = 0;
   updateSidebar();
   showView('client');
 };
@@ -572,7 +578,9 @@ window.selectMonth = function(id) {
   }
   renderClientWorkspace();
   
-  // Scroll to top of content on mobile
+  // Scroll to top of content
+  var monthContainer = document.querySelector('#month-details-section .container');
+  if (monthContainer) monthContainer.scrollTop = 0;
   if (window.innerWidth <= 768) {
     var monthEl = document.getElementById('month-details-section');
     if (monthEl) monthEl.scrollIntoView({ behavior: 'smooth' });
@@ -1121,23 +1129,28 @@ function renderMonthDetails() {
 
   // Separador visual se houver itens "Outros"
   if (outrosItems.length > 0 && videoItems.length > 0) {
+    var outrosEarnings = (billing && typeof billing.outrosAmount === 'number')
+      ? billing.outrosAmount
+      : outrosItems.filter(function(v) { return v.feito && v.cobrado !== false; }).reduce(function(s, v) { return s + (parseFloat(v.valor_individual) || 0); }, 0);
     var outrosEarnFmt = outrosEarnings.toLocaleString('pt-BR', {minimumFractionDigits: 2});
     var separatorIdx = videoItems.length; // posição após os vídeos normais (já ordenados juntos via mVideos sort)
     // Inserir após o último vídeo normal
     var insertAt = mVideos.reduce(function(lastNormalIdx, v, idx) {
       return v.tipo_item !== 'outros' ? idx : lastNormalIdx;
     }, -1);
-    var separator = '<tr><td colspan="8" style="padding:4px 10px; background:rgba(16,185,129,0.08); border-top:1px solid rgba(16,185,129,0.3); border-bottom:1px solid rgba(16,185,129,0.3)"><span style="font-size:10px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:0.08em">📋 Tarefas Avulsas (+ R$ ' + outrosEarnFmt + ')</span></td></tr>';
+    var colsCount = isSimples ? 3 : 8;
+    var separator = '<tr><td colspan="' + colsCount + '" style="padding:4px 10px; background:rgba(16,185,129,0.08); border-top:1px solid rgba(16,185,129,0.3); border-bottom:1px solid rgba(16,185,129,0.3)"><span style="font-size:10px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:0.08em">📋 Tarefas Avulsas (+ R$ ' + outrosEarnFmt + ')</span></td></tr>';
     if (insertAt >= 0) {
       rows.splice(insertAt + 1, 0, separator);
     }
   }
 
   if (rows.length === 0) {
-    rows.push('<tr><td colspan="8" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
+    var colsCount = isSimples ? 3 : 8;
+    rows.push('<tr><td colspan="' + colsCount + '" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
   }
 
-  tbody.innerHTML = rows.join('');
+  if (tbody) tbody.innerHTML = rows.join('');
 }
 
 /* ========== DATA MUTATIONS (V3.0 Extended) ========== */
