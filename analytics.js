@@ -951,42 +951,27 @@ function exportUnifiedPDF(title, dataset, summary, showTime = true) {
         'PERÍODO',
         'VÍDEOS',
         'GANHOS (R$)',
-        'RATIO',
-        'CHARS',
-        'TEMPO'
+        'TEMPO',
+        'RATIO'
       ]]
     : [[
         'PERÍODO',
         'VÍDEOS',
         'GANHOS (R$)',
-        'CHARS'
+        'TEMPO'
       ]];
 
   const tableBody = dataset.map(d => {
+    const timeStr = window.ExcelParser ? window.ExcelParser.secondsToHMS(d.time || 0) : '00:00:00';
     const row = [
       toSafePDF(d.label || '').toUpperCase(),
       d.count,
-      d.earnings.toLocaleString(
-        'pt-BR',
-        {
-          minimumFractionDigits: 2
-        }
-      ),
-      (parseInt(d.chars) || 0).toLocaleString(
-        'pt-BR'
-      )
+      d.earnings.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+      toSafePDF(timeStr)
     ];
 
     if (showTime) {
-      row.splice(
-        3,
-        0,
-        d.ratio.toFixed(2) + 'x'
-      );
-
-      row.push(
-        window.ExcelParser.secondsToHMS(d.time)
-      );
+      row.push(d.ratio.toFixed(2) + 'x');
     }
 
     return row;
@@ -1146,7 +1131,9 @@ function exportMonthlyReportPDF(
   monthPeriod,
   videos,
   summary,
-  showTime = true
+  showTime = true,
+  monthConfig = null,
+  clientObj = null
 ) {
   const { jsPDF } = window.jspdf;
 
@@ -1263,7 +1250,8 @@ function exportMonthlyReportPDF(
     62
   );
 
-  const activeCardsCount = showTime ? 3 : 2;
+  const isSimples = (clientObj && clientObj.simples) || false;
+  const activeCardsCount = (showTime && !isSimples) ? 3 : 2;
   const cardW = (W - 40) / activeCardsCount;
   const cardY = 66;
   const cardH = 26;
@@ -1344,112 +1332,167 @@ function exportMonthlyReportPDF(
     }
   };
 
-  drawKPICard(
-    15,
-    'Faturamento Estimado',
-    summary.earnings || 'R$ 0,00',
-    '',
-    [16, 185, 129]
-  );
+  const billing = monthConfig ? calculateMonthlyBilling(monthConfig, videos) : null;
 
-  drawKPICard(
-    15 + cardW + cardGap,
-    'Vídeos Entregues',
-    summary.count || '0',
-    'TOTAL',
-    [255, 255, 255]
-  );
+  if (billing) {
+    const totalFmt = 'R$ ' + (billing.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const baseFmt = 'Base R$ ' + (billing.basePayment || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const extraFmt = billing.extraAmount > 0 ? ' + Extra R$ ' + billing.extraAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
 
-  if (showTime) {
     drawKPICard(
-      15 + (cardW + cardGap) * 2,
-      'Esforço Acumulado',
-      (
-        summary.hours || '00:00:00'
-      )
-        .split('(')[0]
-        .trim(),
+      15,
+      'Faturamento Total',
+      totalFmt + '\n' + baseFmt + extraFmt,
       '',
-      [245, 158, 11]
+      [16, 185, 129]
     );
+
+    if (isSimples) {
+      drawKPICard(
+        15 + cardW + cardGap,
+        'Vídeos Entregues',
+        `${billing.billableVideoCount || 0} TOTAL`,
+        '',
+        [255, 255, 255]
+      );
+    } else {
+      const incMin = billing.includedMinutes || 225;
+      const baseVids = (monthConfig && monthConfig.base_videos) || 15;
+      drawKPICard(
+        15 + cardW + cardGap,
+        'Franquia Contratada',
+        `${incMin.toFixed(0)} min\n~${baseVids} vids (meta ${(monthConfig.target_video_min || 15)}m/vid)`,
+        '',
+        [96, 165, 250]
+      );
+
+      if (showTime) {
+        const prodMin = billing.billableMinutes || 0;
+        const prodVids = billing.billableVideoCount || 0;
+        const extraMin = billing.extraMinutes || 0;
+        const statusMin = extraMin > 0 ? `+${extraMin.toFixed(0)}m excedentes` : 'Dentro da franquia';
+
+        drawKPICard(
+          15 + (cardW + cardGap) * 2,
+          'Minutos Entregues',
+          `${prodMin.toFixed(0)} min (${prodVids} vids)\n${statusMin}`,
+          '',
+          [245, 158, 11]
+        );
+      }
+    }
+  } else {
+    drawKPICard(
+      15,
+      'Faturamento Estimado',
+      summary.earnings || 'R$ 0,00',
+      '',
+      [16, 185, 129]
+    );
+
+    drawKPICard(
+      15 + cardW + cardGap,
+      'Vídeos Entregues',
+      summary.count || '0',
+      'TOTAL',
+      [255, 255, 255]
+    );
+
+    if (showTime && !isSimples) {
+      drawKPICard(
+        15 + (cardW + cardGap) * 2,
+        'Esforço Acumulado',
+        (
+          summary.hours || '00:00:00'
+        )
+          .split('(')[0]
+          .trim(),
+        '',
+        [245, 158, 11]
+      );
+    }
   }
 
-  const outrosVideos = videos.filter(
-    v => v.tipo_item === 'outros' &&
-      v.feito
-  );
+  // Bloco Demonstrativo de Franquia Contratada (somente quando não for modo simples)
+  let startTableY = 102;
+  if (billing && !isSimples) {
+    const fY = 96;
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(15, fY, W - 30, 20, 3, 3, 'F');
+    doc.setDrawColor(245, 158, 11);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(15, fY, W - 30, 20, 3, 3, 'D');
 
-  const tableHead = showTime
-    ? [[
-        'STATUS',
-        'DETALHES DO TRABALHO',
-        'IDIOMAS',
-        'CHARS',
-        'TEMPO',
-        'RATIO'
-      ]]
-    : [[
-        'STATUS',
-        'DETALHES DO TRABALHO',
-        'IDIOMAS',
-        'CHARS'
-      ]];
+    doc.setTextColor(245, 158, 11);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text('DEMONSTRATIVO DE FRANQUIA CONTRATADA & PRODUCAO DE MINUTOS', 20, fY + 6);
+
+    doc.setTextColor(226, 232, 240);
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+
+    const line1 = `Franquia Contratada: ${billing.includedMinutes.toFixed(0)} min  |  Produzidos no Mes: ${billing.billableMinutes.toFixed(0)} min (equiv. a ${billing.billableVideoCount} videos cobraveis)`;
+    doc.text(toSafePDF(line1), 20, fY + 11);
+
+    const isExcedente = billing.extraMinutes > 0;
+    const line2 = isExcedente
+      ? `Status de Consumo: Excedente de +${billing.extraMinutes.toFixed(0)} min  |  Cobranca extra excedente: R$ ${billing.extraAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`
+      : `Status de Consumo: Dentro da franquia contratada  |  ${(billing.includedMinutes - billing.billableMinutes).toFixed(0)} min disponiveis de saldo`;
+
+    doc.setTextColor(isExcedente ? 239 : 16, isExcedente ? 68 : 185, isExcedente ? 68 : 129);
+    doc.setFont('helvetica', 'bold');
+    doc.text(toSafePDF(line2), 20, fY + 16);
+
+    startTableY = 122;
+  }
+
+  const outrosVideos = videos.filter(v => v.tipo_item === 'outros' && v.feito);
+  const filteredVideos = videos.filter(v => v.tipo_item !== 'outros');
+
+  const tableHead = isSimples
+    ? [['STATUS', 'VIDEO / TITULO']]
+    : (showTime
+        ? [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO', 'RATIO']]
+        : [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO']]);
 
   doc.autoTable({
-    startY: 102,
+    startY: startTableY,
     head: tableHead,
 
-    body: videos
-      .filter(v => v.tipo_item !== 'outros')
-      .map(v => {
-        let status;
+    body: filteredVideos.map(v => {
+      let status;
 
-        if (!v.feito) {
-          status = 'PENDENTE';
-        } else if (v.cobrado === false) {
-          status = 'CORTESIA';
-        } else {
-          status = '';
-        }
+      if (!v.feito) {
+        status = 'PENDENTE';
+      } else if (v.cobrado === false) {
+        status = 'CORTESIA';
+      } else {
+        status = isSimples ? 'V CONCLUIDO' : '';
+      }
 
-        const row = [
-          status,
-          toSafePDF(
-            v.titulo || '–'
-          ).toUpperCase(),
-          v.idiomas || 7,
-          toSafePDF(
-            (
-              parseInt(v.chars) || 0
-            ).toLocaleString('pt-BR')
-          )
-        ];
+      const titleText = toSafePDF(v.titulo || '–').toUpperCase();
 
-        if (showTime) {
-          const ratio =
-            v.tempo > 0 &&
-            v.tempo_fazer > 0
-              ? (
-                  v.tempo_fazer /
-                  v.tempo
-                ).toFixed(1) + 'x'
-              : '–';
+      if (isSimples) {
+        return [status, titleText];
+      }
 
-          row.push(
-            toSafePDF(
-              window.ExcelParser.secondsToHMS(
-                v.tempo
-              )
-            )
-          );
+      const timeFmt = window.ExcelParser ? window.ExcelParser.secondsToHMS(v.tempo) : '00:00:00';
 
-          row.push(
-            toSafePDF(ratio)
-          );
-        }
+      const row = [
+        status,
+        titleText,
+        v.idiomas || 7,
+        toSafePDF(timeFmt)
+      ];
 
-        return row;
-      }),
+      if (showTime) {
+        const ratio = (v.tempo > 0 && v.tempo_fazer > 0) ? (v.tempo_fazer / v.tempo).toFixed(1) + 'x' : '–';
+        row.push(toSafePDF(ratio));
+      }
+
+      return row;
+    }),
 
     styles: {
       fontSize: 7.5,
@@ -1475,42 +1518,19 @@ function exportMonthlyReportPDF(
       fillColor: [15, 23, 42]
     },
 
-    columnStyles: {
-      0: {
-        cellWidth: 26,
-        fontStyle: 'bold'
-      },
-
-      1: {
-        cellWidth: 'auto'
-      },
-
-      2: {
-        cellWidth: 24,
-        halign: 'center'
-      },
-
-      3: {
-        cellWidth: 20,
-        halign: 'right'
-      },
-
-      4: {
-        cellWidth: 22,
-        halign: 'center'
-      },
-
-      5: {
-        cellWidth: 20,
-        halign: 'center'
-      }
+    columnStyles: isSimples ? {
+      0: { cellWidth: 32, fontStyle: 'bold' },
+      1: { cellWidth: 'auto' }
+    } : {
+      0: { cellWidth: 24, fontStyle: 'bold' },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 20, halign: 'center' },
+      3: { cellWidth: 24, halign: 'center', fontStyle: 'bold', textColor: [245, 158, 11] },
+      4: { cellWidth: 20, halign: 'center' }
     },
 
     didDrawCell: function(data) {
-      if (
-        data.row.index !== undefined &&
-        data.section === 'body'
-      ) {
+      if (data.row.index !== undefined && data.section === 'body') {
         doc.setDrawColor(30, 41, 59);
         doc.setLineWidth(0.05);
 
@@ -1520,28 +1540,31 @@ function exportMonthlyReportPDF(
           data.cell.x + data.cell.width,
           data.cell.y + data.cell.height
         );
+
+        if (data.column.index === 1) {
+          const item = filteredVideos[data.row.index];
+          if (item && item.link && item.link.trim()) {
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: item.link.trim() });
+          }
+        }
       }
     },
 
     didParseCell: function(data) {
-      if (
-        data.section === 'body' &&
-        data.column.index === 0
-      ) {
-        if (data.cell.raw === 'CORTESIA') {
-          data.cell.styles.textColor = [
-            96,
-            165,
-            250
-          ];
-        } else if (
-          data.cell.raw === 'PENDENTE'
-        ) {
-          data.cell.styles.textColor = [
-            239,
-            68,
-            68
-          ];
+      if (data.section === 'body') {
+        if (data.column.index === 0) {
+          if (data.cell.raw === 'CORTESIA') {
+            data.cell.styles.textColor = [96, 165, 250];
+          } else if (data.cell.raw === 'PENDENTE') {
+            data.cell.styles.textColor = [239, 68, 68];
+          } else if (data.cell.raw === 'V CONCLUIDO') {
+            data.cell.styles.textColor = [16, 185, 129];
+          }
+        } else if (data.column.index === 1) {
+          const item = filteredVideos[data.row.index];
+          if (item && item.link && item.link.trim()) {
+            data.cell.styles.textColor = [96, 165, 250];
+          }
         }
       }
     },

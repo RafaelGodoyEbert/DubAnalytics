@@ -1035,7 +1035,7 @@ function renderMonthDetails() {
     if (isSimples) {
       thead.innerHTML = '<th>Status</th><th style="width:100%">Título</th><th>Ações</th>';
     } else {
-      thead.innerHTML = '<th>Status</th><th>Transc.</th><th>Título</th><th>Idiomas</th><th>Chars</th><th>Ratio</th><th>Tempo</th><th>Ações</th>';
+      thead.innerHTML = '<th>Status</th><th>Transc.</th><th>Título</th><th>Idiomas</th><th>Tempo</th><th>Ratio</th><th>Ações</th>';
     }
   }
 
@@ -1051,13 +1051,13 @@ function renderMonthDetails() {
         var valorFmt = (parseFloat(v.valor_individual) || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2});
         var outrosCols = isSimples
           ? '<td><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + '</div><div style="font-size:10px; color:#10b981">Tarefa avulsa \u2022 R$ ' + valorFmt + (v.comentario ? ' \u2022 ' + v.comentario : '') + '</div></td>'
-          : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="4"><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
+          : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="3"><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
         var feitoCls = v.feito ? 'bg-done' : 'bg-todo';
         var feitoLbl = v.feito ? '\u2713 Feito' : '\u2717 Pend.';
         return '<tr style="background:rgba(16,185,129,0.05); border-left:3px solid #10b981">' +
           '<td><button class="badge ' + feitoCls + '" onclick="toggleVideoField(\'' + v.id + '\', \'feito\')">' + feitoLbl + '</button></td>' +
           outrosCols +
-          '<td><button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> <button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button></td>' +
+          '<td><button onclick="moveVideoToNextMonth(\'' + v.id + '\')" class="btn-ghost" title="Enviar para o próximo mês">➡️</button> <button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> <button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button></td>' +
           '</tr>';
       }
 
@@ -1090,6 +1090,7 @@ function renderMonthDetails() {
 
       var actions = '<td>' +
         (v.link ? '<a href="' + v.link + '" target="_blank" class="btn-ghost" style="color:var(--accent);text-decoration:none;padding:5px;margin-right:5px" title="Abrir Vídeo">🔗</a>' : '') +
+        '<button onclick="moveVideoToNextMonth(\'' + v.id + '\')" class="btn-ghost" title="Enviar para o próximo mês">➡️</button> ' +
         '<button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">✎</button> ' +
         '<button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">✕</button>' +
         '</td>';
@@ -1114,14 +1115,13 @@ function renderMonthDetails() {
           '</div>' +
         '</td>' +
         '<td class="text-accent">' + v.idiomas + '</td>' +
-        '<td>' + (parseInt(v.chars) || 0).toLocaleString('pt-BR') + '</td>' +
-        '<td style="font-weight:600; color:' + (ratio > 8 ? 'var(--danger)' : ratio > 6 ? 'var(--accent)' : '#10b981') + '">' + (ratio !== '\u2013' ? ratio + 'x' : '\u2013') + '</td>' +
         '<td>' + ExcelParser.secondsToHMS(v.tempo) + overBadge + '</td>' +
+        '<td style="font-weight:600; color:' + (ratio > 8 ? 'var(--danger)' : ratio > 6 ? 'var(--accent)' : '#10b981') + '">' + (ratio !== '\u2013' ? ratio + 'x' : '\u2013') + '</td>' +
         actions +
       '</tr>';
     } catch (e) {
       console.error('Erro ao renderizar linha de video:', e, v);
-      return '<tr><td colspan="8" style="color:var(--danger)">Erro ao carregar vídeo: ' + v.titulo + '</td></tr>';
+      return '<tr><td colspan="7" style="color:var(--danger)">Erro ao carregar vídeo: ' + v.titulo + '</td></tr>';
     }
   }
 
@@ -1138,7 +1138,7 @@ function renderMonthDetails() {
     var insertAt = mVideos.reduce(function(lastNormalIdx, v, idx) {
       return v.tipo_item !== 'outros' ? idx : lastNormalIdx;
     }, -1);
-    var colsCount = isSimples ? 3 : 8;
+    var colsCount = isSimples ? 3 : 7;
     var separator = '<tr><td colspan="' + colsCount + '" style="padding:4px 10px; background:rgba(16,185,129,0.08); border-top:1px solid rgba(16,185,129,0.3); border-bottom:1px solid rgba(16,185,129,0.3)"><span style="font-size:10px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:0.08em">📋 Tarefas Avulsas (+ R$ ' + outrosEarnFmt + ')</span></td></tr>';
     if (insertAt >= 0) {
       rows.splice(insertAt + 1, 0, separator);
@@ -1146,7 +1146,7 @@ function renderMonthDetails() {
   }
 
   if (rows.length === 0) {
-    var colsCount = isSimples ? 3 : 8;
+    var colsCount = isSimples ? 3 : 7;
     rows.push('<tr><td colspan="' + colsCount + '" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
   }
 
@@ -1268,6 +1268,71 @@ window.deleteVideo = async function(id) {
   renderMonthDetails();
 };
 
+window.moveVideoToNextMonth = async function(videoId) {
+  var v = State.videos.find(function(x) { return x.id === videoId; });
+  if (!v) return;
+
+  var curMonth = State.monthlyConfigs.find(function(m) { return m.id === v.monthId; }) || State.selectedMonth;
+  var clientId = curMonth ? curMonth.clientId : (v.clientId || (State.selectedClient ? State.selectedClient.id : null));
+
+  var MONTHS = 'Jan Fev Mar Abr Mai Jun Jul Ago Set Out Nov Dez'.split(' ');
+  var parts = (curMonth && curMonth.label ? curMonth.label : '').trim().split(' ');
+  var monthName = parts[0];
+  var yearNum = parseInt(parts[1]) || new Date().getFullYear();
+  var idx = MONTHS.indexOf(monthName);
+
+  var nextLabel = '';
+  if (idx !== -1) {
+    var nextIdx = (idx + 1) % 12;
+    var nextYear = (idx === 11) ? yearNum + 1 : yearNum;
+    nextLabel = MONTHS[nextIdx] + ' ' + nextYear;
+  } else {
+    var now = new Date();
+    nextLabel = MONTHS[now.getMonth()] + ' ' + now.getFullYear();
+  }
+
+  if (!confirm('Deseja mover o item "' + (v.titulo || 'Sem título') + '" para o mês de ' + nextLabel + '?')) return;
+
+  var nextMonth = State.monthlyConfigs.find(function(m) {
+    return m.clientId === clientId && m.label === nextLabel;
+  });
+
+  if (!nextMonth) {
+    var cDef = (State.selectedClient && State.selectedClient.id === clientId) ? State.selectedClient : (State.clients ? State.clients.find(function(c) { return c.id === clientId; }) : null) || {};
+    var nextMonthId = clientId + '_' + nextLabel.replace(/\s+/g, '_') + '_' + Date.now();
+    nextMonth = {
+      id: nextMonthId,
+      clientId: clientId,
+      label: nextLabel,
+      billing_mode: curMonth ? curMonth.billing_mode : (cDef.default_billing_mode || 'per_video'),
+      base_payment: curMonth && curMonth.base_payment !== undefined ? curMonth.base_payment : (cDef.default_base !== undefined ? cDef.default_base : 500),
+      base_videos: curMonth && curMonth.base_videos !== undefined ? curMonth.base_videos : (cDef.default_bvid !== undefined ? cDef.default_bvid : 15),
+      price_per_video: curMonth && curMonth.price_per_video !== undefined ? curMonth.price_per_video : (cDef.default_ppv !== undefined ? cDef.default_ppv : 40),
+      target_video_min: curMonth && curMonth.target_video_min !== undefined ? curMonth.target_video_min : (cDef.default_target_video_min !== undefined ? cDef.default_target_video_min : 15),
+      target_total_minutes: curMonth && curMonth.target_total_minutes !== undefined ? curMonth.target_total_minutes : (cDef.default_target_total_minutes !== undefined ? cDef.default_target_total_minutes : 225),
+      extra_minute_block: curMonth && curMonth.extra_minute_block !== undefined ? curMonth.extra_minute_block : (cDef.default_extra_minute_block !== undefined ? cDef.default_extra_minute_block : 15),
+      extra_minute_price: curMonth && curMonth.extra_minute_price !== undefined ? curMonth.extra_minute_price : (cDef.default_extra_minute_price !== undefined ? cDef.default_extra_minute_price : 40),
+      extra_minute_rounding: (curMonth && curMonth.extra_minute_rounding) || cDef.default_extra_minute_rounding || 'proportional',
+      bonus: 0,
+      compensate: false
+    };
+    await DB.put('monthlyConfig', nextMonth);
+    State.monthlyConfigs.push(nextMonth);
+  }
+
+  v.monthId = nextMonth.id;
+  v.label = nextMonth.label;
+  v.year = parseInt(nextLabel.split(' ')[1]) || v.year;
+
+  await DB.put('videos', v);
+
+  if (State.activeView === 'client' && State.selectedClient) {
+    renderClientWorkspace();
+  } else {
+    renderMonthDetails();
+  }
+};
+
 window.deleteMonth = async function(id) {
   if (!confirm('Excluir este mês e todos os vídeos/tarefas vinculadas a ele? Esta ação não pode ser desfeita.')) return;
   
@@ -1307,7 +1372,7 @@ window.openClientModal = function(existingId) {
         '<div class="form-group" style="grid-column: span 2">' +
           '<label>Modelo de Cobrança Padrão</label>' +
           '<select id="new-client-billing-mode" onchange="window.toggleClientModalMode(this.value)">' +
-            '<option value="per_video"' + (!isMinMode ? ' selected' : '') + '>Por Vídeo (Legado)</option>' +
+            '<option value="per_video"' + (!isMinMode ? ' selected' : '') + '>Por Vídeo</option>' +
             '<option value="minute_overage"' + (isMinMode ? ' selected' : '') + '>Franquia de Minutos</option>' +
           '</select>' +
         '</div>' +
@@ -1505,6 +1570,7 @@ window.openVideoModal = function(videoId) {
 
     '<input type="hidden" id="v-tipo" value="' + tipoAtual + '">' +
     '<div class="modal-footer">' +
+      (v ? '<button class="btn-ghost" style="color:var(--accent); border-color:rgba(245, 158, 11, 0.4); font-size:11px; margin-right:auto" onclick="closeModal(); moveVideoToNextMonth(\'' + v.id + '\')">➡️ Enviar para Próximo Mês</button>' : '') +
       '<button class="btn-ghost" onclick="closeModal()">Cancelar</button>' +
       '<button class="btn-accent" style="padding: 12px 30px; font-size: 12px" onclick="saveVideoModal(\'' + (videoId || '') + '\')">Salvar</button>' +
     '</div>'
@@ -1608,7 +1674,9 @@ window.exportMonthPDF = function() {
     m.periodo,
     mVideos,
     { earnings: earnStr, count: countStr, hours: hourStr },
-    showTime
+    showTime,
+    m,
+    State.selectedClient
   );
 };
 

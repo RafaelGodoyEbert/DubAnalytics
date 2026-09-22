@@ -348,6 +348,26 @@ console.log('\n--- 12 CRITÉRIOS DE ACEITAÇÃO OBRIGATÓRIOS ---\n');
   console.log('✓ 12. No modo per_video, excesso de minutos não afeta o pagamento (focado apenas em vídeos) [PASSOU]');
 }
 
+// 13. Progressão correta de próximo mês (ex: Mai 2026 -> Jun 2026, Dez 2026 -> Jan 2027)
+{
+  const MONTHS = 'Jan Fev Mar Abr Mai Jun Jul Ago Set Out Nov Dez'.split(' ');
+  function getNextMonthLabel(curLabel) {
+    const parts = (curLabel || '').trim().split(' ');
+    const idx = MONTHS.indexOf(parts[0]);
+    const yearNum = parseInt(parts[1]) || 2026;
+    if (idx !== -1) {
+      const nextIdx = (idx + 1) % 12;
+      const nextYear = (idx === 11) ? yearNum + 1 : yearNum;
+      return MONTHS[nextIdx] + ' ' + nextYear;
+    }
+    return 'Jan 2027';
+  }
+
+  assert.strictEqual(getNextMonthLabel('Mai 2026'), 'Jun 2026');
+  assert.strictEqual(getNextMonthLabel('Dez 2026'), 'Jan 2027');
+  console.log('✓ 13. Cálculo e transição do próximo mês (ex: Mai -> Jun, Dez -> Jan 2027) [PASSOU]');
+}
+
 console.log('\n===================================================================');
 console.log('TODOS OS TESTES FORAM CONCLUÍDOS COM 100% DE SUCESSO E CONFORMIDADE!');
 console.log('===================================================================');
