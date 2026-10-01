@@ -1068,9 +1068,9 @@ function renderMonthDetails() {
       var statusBtn = '<div class="status-dropdown" id="sd-' + v.id + '">' +
         '<button class="badge ' + stCls + '" onclick="toggleStatusDropdown(event,\'' + v.id + '\')">' + stLabel + ' ▾</button>' +
         '<div class="status-menu">' +
-          '<button class="status-menu-item' + (curState==='todo'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'todo\')"><span class="status-dot" style="background:#ef4444"></span>✗ Pendente</button>' +
-          '<button class="status-menu-item' + (curState==='info'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'info\')"><span class="status-dot" style="background:#60a5fa"></span>✓ Entregue</button>' +
-          '<button class="status-menu-item' + (curState==='done'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'done\')"><span class="status-dot" style="background:#10b981"></span>💰 Cobrado</button>' +
+          '<button class="status-menu-item' + (curState==='todo'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'todo\',event)"><span class="status-dot" style="background:#ef4444"></span>✗ Pendente</button>' +
+          '<button class="status-menu-item' + (curState==='info'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'info\',event)"><span class="status-dot" style="background:#60a5fa"></span>✓ Entregue</button>' +
+          '<button class="status-menu-item' + (curState==='done'?' active':'') + '" onclick="setVideoStatus(\'' + v.id + '\',\'done\',event)"><span class="status-dot" style="background:#10b981"></span>💰 Cobrado</button>' +
         '</div>' +
       '</div>';
 
@@ -1164,25 +1164,36 @@ window.toggleVideoField = async function(videoId, field) {
 
 // Abre/fecha o dropdown de status de um vídeo
 window.toggleStatusDropdown = function(event, videoId) {
-  event.stopPropagation();
+  if (event) event.stopPropagation();
   var el = document.getElementById('sd-' + videoId);
   if (!el) return;
   var isOpen = el.classList.contains('open');
   // Fecha todos os abertos
   document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
-  if (!isOpen) el.classList.add('open');
+  if (!isOpen) {
+    el.classList.add('open');
+    var rect = el.getBoundingClientRect();
+    if (window.innerHeight - rect.bottom < 150) {
+      el.classList.add('drop-up');
+    } else {
+      el.classList.remove('drop-up');
+    }
+  }
 };
 
 // Fecha dropdowns ao clicar fora
-document.addEventListener('click', function() {
-  document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
-}, true);
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.status-dropdown')) {
+    document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+  }
+});
 
 // Guard contra double-click — só faz o put uma vez por vídeo por vez
 var _statusSaving = {};
 
 // Define status diretamente (sem ciclo) — evita 2 clicks mandarem 3 requests
-window.setVideoStatus = async function(videoId, status) {
+window.setVideoStatus = async function(videoId, status, event) {
+  if (event) event.stopPropagation();
   if (_statusSaving[videoId]) return;
   _statusSaving[videoId] = true;
   // Fecha dropdown

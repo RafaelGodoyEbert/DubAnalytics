@@ -440,6 +440,7 @@ input:checked + .slider:before { transform: translateX(18px); }
   margin-top: 10px; 
   border-color: rgba(255,255,255,0.04); 
   position: relative;
+  padding-bottom: 70px;
 }
 .table-card::-webkit-scrollbar { height: 6px; }
 .table-card::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
@@ -484,12 +485,15 @@ tr:hover { background: rgba(255,255,255,0.02); }
   position: relative;
   display: inline-block;
 }
+.status-dropdown.open {
+  z-index: 999;
+}
 .status-menu {
   display: none;
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 200;
+  z-index: 999;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -498,6 +502,10 @@ tr:hover { background: rgba(255,255,255,0.02); }
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   flex-direction: column;
   gap: 2px;
+}
+.status-dropdown.drop-up .status-menu {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 .status-dropdown.open .status-menu {
   display: flex;
