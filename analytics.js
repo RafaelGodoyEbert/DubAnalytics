@@ -740,7 +740,7 @@ function renderCharts(canvasId, dataset, type) {
   });
 }
 
-function exportUnifiedPDF(title, dataset, summary, showTime = true) {
+function exportUnifiedPDF(title, dataset, summary, showTime = true, clientObj = null) {
   const { jsPDF } = window.jspdf;
 
   const doc = new jsPDF({
@@ -788,7 +788,10 @@ function exportUnifiedPDF(title, dataset, summary, showTime = true) {
   doc.setTextColor(245, 158, 11);
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
-  doc.text('DubAnalytics Report', 15, 20);
+  const pdfTitle = (clientObj && clientObj.pdf_title && clientObj.pdf_title.trim())
+    ? clientObj.pdf_title.trim()
+    : 'DubAnalytics Report';
+  doc.text(toSafePDF(pdfTitle), 15, 20);
 
   doc.setTextColor(100, 116, 139);
   doc.setFontSize(8);
@@ -1192,8 +1195,12 @@ function exportMonthlyReportPDF(
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
 
+  const pdfTitle = (clientObj && clientObj.pdf_title && clientObj.pdf_title.trim())
+    ? clientObj.pdf_title.trim()
+    : 'DubAnalytics Report';
+
   doc.text(
-    'DubAnalytics Report',
+    toSafePDF(pdfTitle),
     15,
     20
   );
@@ -2710,7 +2717,10 @@ function exportMinuteImpactPDF(client, videos, minuteData) {
     doc.setTextColor(245, 158, 11);
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text(toSafePDF('DubAnalytics - Relatorio de Impacto Comercial'), 15, 18);
+    const dossierHeader = (client && client.pdf_title && client.pdf_title.trim())
+      ? client.pdf_title.trim() + ' - Relatorio de Impacto Comercial'
+      : 'DubAnalytics - Relatorio de Impacto Comercial';
+    doc.text(toSafePDF(dossierHeader), 15, 18);
 
     doc.setTextColor(148, 163, 184);
     doc.setFontSize(9);

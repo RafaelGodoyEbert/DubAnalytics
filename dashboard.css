@@ -434,13 +434,13 @@ input:checked + .slider:before { transform: translateX(18px); }
 .table-card { 
   padding: 0; 
   overflow-x: auto; 
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.2) transparent;
   margin-top: 10px; 
   border-color: rgba(255,255,255,0.04); 
   position: relative;
-  padding-bottom: 70px;
+}
+.table-card:has(.status-dropdown.open),
+.table-card.has-dropdown-open {
+  overflow: visible !important;
 }
 .table-card::-webkit-scrollbar { height: 6px; }
 .table-card::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
@@ -493,7 +493,7 @@ tr:hover { background: rgba(255,255,255,0.02); }
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 999;
+  z-index: 9999;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;

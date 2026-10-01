@@ -1168,15 +1168,25 @@ window.toggleStatusDropdown = function(event, videoId) {
   var el = document.getElementById('sd-' + videoId);
   if (!el) return;
   var isOpen = el.classList.contains('open');
+
   // Fecha todos os abertos
-  document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+  document.querySelectorAll('.status-dropdown').forEach(function(d) {
+    d.classList.remove('open');
+    d.classList.remove('drop-up');
+  });
+  document.querySelectorAll('.table-card').forEach(function(c) {
+    c.classList.remove('has-dropdown-open');
+  });
+
   if (!isOpen) {
     el.classList.add('open');
+    var card = el.closest('.table-card');
+    if (card) card.classList.add('has-dropdown-open');
+
     var rect = el.getBoundingClientRect();
-    if (window.innerHeight - rect.bottom < 150) {
+    // Se o botão estiver perto do rodapé da tela, abre para cima
+    if (rect.bottom > window.innerHeight - 180) {
       el.classList.add('drop-up');
-    } else {
-      el.classList.remove('drop-up');
     }
   }
 };
@@ -1184,7 +1194,13 @@ window.toggleStatusDropdown = function(event, videoId) {
 // Fecha dropdowns ao clicar fora
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.status-dropdown')) {
-    document.querySelectorAll('.status-dropdown.open').forEach(function(d) { d.classList.remove('open'); });
+    document.querySelectorAll('.status-dropdown').forEach(function(d) {
+      d.classList.remove('open');
+      d.classList.remove('drop-up');
+    });
+    document.querySelectorAll('.table-card').forEach(function(c) {
+      c.classList.remove('has-dropdown-open');
+    });
   }
 });
 
@@ -1198,7 +1214,13 @@ window.setVideoStatus = async function(videoId, status, event) {
   _statusSaving[videoId] = true;
   // Fecha dropdown
   var el = document.getElementById('sd-' + videoId);
-  if (el) el.classList.remove('open');
+  if (el) {
+    el.classList.remove('open');
+    el.classList.remove('drop-up');
+  }
+  document.querySelectorAll('.table-card').forEach(function(c) {
+    c.classList.remove('has-dropdown-open');
+  });
 
   var v = State.videos.find(function(x) { return x.id === videoId; });
   if (!v) { _statusSaving[videoId] = false; return; }
@@ -1370,6 +1392,7 @@ window.openClientModal = function(existingId) {
   showModal(
     '<h2>👤 ' + (c ? 'Editar' : 'Novo') + ' Cliente</h2>' +
     '<div class="form-group"><label>Nome do Cliente</label><input type="text" id="new-client-name" value="' + (c ? c.name : '') + '" placeholder="Ex: SanInPlay"></div>' +
+    '<div class="form-group"><label>Título no PDF (Opcional)</label><input type="text" id="new-client-pdf-title" value="' + (c && c.pdf_title ? c.pdf_title : '') + '" placeholder="Ex: Relatório de Dublagem, Relatório de Edição (Padrão: DubAnalytics Report)"></div>' +
     '<div style="background:rgba(99,102,241,0.06); border:1px solid rgba(99,102,241,0.2); border-radius:10px; padding:12px; margin-bottom:15px; display:flex; align-items:flex-start; gap:10px">' +
       '<input type="checkbox" id="new-client-simples" ' + (c && c.simples ? 'checked' : '') + ' style="width:16px; height:16px; margin-top:2px; cursor:pointer">' +
       '<div>' +
@@ -1437,6 +1460,7 @@ window.toggleClientModalMode = function(mode) {
 window.saveClient = async function(existingId) {
   var name = document.getElementById('new-client-name').value.trim();
   if (!name) return;
+  var pdfTitle = document.getElementById('new-client-pdf-title') ? document.getElementById('new-client-pdf-title').value.trim() : '';
   var simples = document.getElementById('new-client-simples') ? document.getElementById('new-client-simples').checked : false;
   var mode = document.getElementById('new-client-billing-mode') ? document.getElementById('new-client-billing-mode').value : 'per_video';
   
@@ -1461,6 +1485,7 @@ window.saveClient = async function(existingId) {
     var client = State.clients.find(function(c) { return c.id === existingId; });
     if (client) {
       client.name = name;
+      client.pdf_title = pdfTitle;
       client.simples = simples;
       Object.assign(client, defaults);
       await DB.put('clients', client);
@@ -1469,7 +1494,7 @@ window.saveClient = async function(existingId) {
     }
   } else {
     var id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
-    var newClient = { id: id, name: name, active: true, simples: simples };
+    var newClient = { id: id, name: name, pdf_title: pdfTitle, active: true, simples: simples };
     Object.assign(newClient, defaults);
     await DB.put('clients', newClient);
     updateSidebar(); selectClient(id);
@@ -1663,7 +1688,8 @@ window.exportCurrentViewPDF = function() {
   var hourStr = State.activeView === 'general' ? document.getElementById('gen-total-hours').innerText : document.getElementById('co-hours').innerText;
   
   var showTime = document.getElementById('pdf-show-time').checked;
-  Analytics.exportUnifiedPDF(title, agg, { earnings: earnStr, count: countStr, hours: hourStr }, showTime);
+  var clientObj = State.activeView === 'general' ? null : State.selectedClient;
+  Analytics.exportUnifiedPDF(title, agg, { earnings: earnStr, count: countStr, hours: hourStr }, showTime, clientObj);
 };
 
 window.exportMonthPDF = function() {
