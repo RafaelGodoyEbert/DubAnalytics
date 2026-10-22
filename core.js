@@ -834,6 +834,10 @@ function renderMonthDetails() {
   
   var bonusVal = parseFloat(m.bonus);
   document.getElementById('cfg-bonus').value = isNaN(bonusVal) ? 0 : bonusVal;
+
+  var paidVal = parseFloat(m.paid_amount);
+  var paidInputEl = document.getElementById('cfg-paid');
+  if (paidInputEl) paidInputEl.value = isNaN(paidVal) ? 0 : paidVal;
   
   var targetMinVal = (m.target_video_min !== undefined && m.target_video_min !== null && m.target_video_min !== '')
     ? parseFloat(m.target_video_min)
@@ -902,6 +906,11 @@ function renderMonthDetails() {
   var cobrados = videoItems.filter(isCobrado).length;
   var entregues = videoItems.filter(isEntregue).length; // feito mas não cobrado
   var totalVids  = videoItems.length;
+
+  if (isSimples && videoItems.length === 0 && outrosItems.length > 0) {
+    cobrados = outrosItems.filter(function(v) { return v.feito; }).length;
+    totalVids = outrosItems.length;
+  }
 
   var totalWorkSeconds = 0;
   var totalVideoSeconds = 0;
@@ -977,7 +986,7 @@ function renderMonthDetails() {
     (entregues > 0 ? '\n<div style="font-size:9px; color:#60a5fa; margin-top:2px">+' + entregues + ' entregue' + (entregues > 1 ? 's' : '') + ' s/ cobrança</div>' : '');
   var statDoneCard = statDoneEl.closest('.card');
   if (statDoneCard) {
-    statDoneCard.querySelector('small').innerText = 'COBRADOS / TOTAL';
+    statDoneCard.querySelector('small').innerText = (isSimples && videoItems.length === 0) ? 'TAREFAS / TOTAL' : 'COBRADOS / TOTAL';
     if (entregues > 0) statDoneCard.classList.add('card-long-text');
     else statDoneCard.classList.remove('card-long-text');
   }
@@ -989,6 +998,25 @@ function renderMonthDetails() {
   }
 
   document.getElementById('m-stat-pay').innerText = 'R$ ' + earnings.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  var paidAmount = billing.paidAmount !== undefined ? billing.paidAmount : (parseFloat(m.paid_amount) || 0);
+  var pendingAmount = earnings - paidAmount;
+
+  var statPaidEl = document.getElementById('m-stat-paid');
+  if (statPaidEl) {
+    statPaidEl.innerText = 'R$ ' + paidAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+
+  var statPendingEl = document.getElementById('m-stat-pending');
+  if (statPendingEl) {
+    if (earnings > 0 && pendingAmount <= 0) {
+      statPendingEl.innerHTML = 'Quitado <span style="font-size:13px">✓</span>';
+      statPendingEl.className = 'stat-value text-success';
+    } else {
+      statPendingEl.innerText = 'R$ ' + Math.max(0, pendingAmount).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      statPendingEl.className = 'stat-value ' + (paidAmount > 0 ? 'text-warning' : 'text-accent');
+    }
+  }
   var monthDays = (totalWorkSeconds / 86400).toFixed(1);
   document.getElementById('m-stat-hours').innerHTML = ExcelParser.secondsToHMS(totalWorkSeconds) + '<span class="stat-unit">(~' + monthDays + 'd)</span>';
   document.getElementById('m-stat-ratio').innerText = (totalVideoSeconds > 0 ? (totalWorkSeconds / totalVideoSeconds).toFixed(2) : '0.0') + 'x';
@@ -1270,6 +1298,15 @@ window.updateMonthConfig = async function(field, value) {
   }
   await DB.put('monthlyConfig', State.selectedMonth);
   renderMonthDetails();
+};
+
+window.quickEditPaidAmount = async function() {
+  if (!State.selectedMonth) return;
+  var currentPaid = parseFloat(State.selectedMonth.paid_amount) || 0;
+  var val = prompt('Informe o valor pago pelo cliente neste mês (R$):', currentPaid);
+  if (val === null) return;
+  var num = parseFloat(val.replace(',', '.'));
+  await updateMonthConfig('paid_amount', isNaN(num) ? 0 : num);
 };
 
 window.deleteClient = function(e, id) {

@@ -333,6 +333,7 @@ option {
 .text-success { color: var(--success); }
 .text-accent { color: var(--accent); }
 .text-danger { color: var(--danger); }
+.text-warning { color: #f59e0b; }
 
 /* Client Month Sidebar */
 .client-view-inner { display: flex; height: 100%; width: 100%; overflow: hidden; }
@@ -636,6 +637,8 @@ body.privacy-mode .stat-value.text-success,
 body.privacy-mode #gen-total-earnings,
 body.privacy-mode #co-earnings,
 body.privacy-mode #m-stat-pay,
+body.privacy-mode #m-stat-paid,
+body.privacy-mode #m-stat-pending,
 body.privacy-mode .pricing-highlight,
 body.privacy-mode .package-suggestion-card div[style*="font-size:22px"] {
   filter: blur(8px);
@@ -648,6 +651,8 @@ body.privacy-mode .stat-value.text-success:hover,
 body.privacy-mode #gen-total-earnings:hover,
 body.privacy-mode #co-earnings:hover,
 body.privacy-mode #m-stat-pay:hover,
+body.privacy-mode #m-stat-paid:hover,
+body.privacy-mode #m-stat-pending:hover,
 body.privacy-mode .pricing-highlight:hover {
   filter: blur(0px); /* Optional: allow peeking on hover? No, user said hide. But blur(0) on hover is a nice UX if they really need to check. Let's stick to full hide for now or slight blur. */
 }

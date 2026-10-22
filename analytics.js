@@ -153,6 +153,8 @@ function calculatePerVideoBilling(config, videos, context) {
 
   const extraAmount = extraToPayThisMonth * ppv;
   const total = base + extraAmount + bonus + outrosEarnings;
+  const paidAmount = parseFloat(config.paid_amount) || 0;
+  const pendingAmount = Math.max(0, total - paidAmount);
 
   return {
     mode: 'per_video',
@@ -167,6 +169,8 @@ function calculatePerVideoBilling(config, videos, context) {
     bonus: bonus,
     outrosAmount: outrosEarnings,
     total: total,
+    paidAmount: paidAmount,
+    pendingAmount: pendingAmount,
     balance: balance
   };
 }
@@ -231,6 +235,8 @@ function calculateMinuteBilling(config, videos, context) {
   }
 
   const total = base + extraAmount + bonus + outrosEarnings;
+  const paidAmount = parseFloat(config.paid_amount) || 0;
+  const pendingAmount = Math.max(0, total - paidAmount);
 
   return {
     mode: 'minute_overage',
@@ -245,6 +251,8 @@ function calculateMinuteBilling(config, videos, context) {
     bonus: bonus,
     outrosAmount: outrosEarnings,
     total: total,
+    paidAmount: paidAmount,
+    pendingAmount: pendingAmount,
     balance: cobradosCount - baseVideos
   };
 }
@@ -1346,19 +1354,49 @@ function exportMonthlyReportPDF(
     const baseFmt = 'Base R$ ' + (billing.basePayment || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
     const extraFmt = billing.extraAmount > 0 ? ' + Extra R$ ' + billing.extraAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
 
-    drawKPICard(
-      15,
-      'Faturamento Total',
-      totalFmt + '\n' + baseFmt + extraFmt,
-      '',
-      [16, 185, 129]
-    );
+    if (billing.paidAmount > 0) {
+      if (billing.pendingAmount <= 0) {
+        drawKPICard(
+          15,
+          'Status do Pagamento',
+          'QUITADO \u2713' + '\n' + `Faturamento: ${totalFmt} (Pago integral)`,
+          '',
+          [16, 185, 129]
+        );
+      } else {
+        const pendingFmt = 'R$ ' + billing.pendingAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        const paidFmt = 'R$ ' + billing.paidAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+        drawKPICard(
+          15,
+          'Total a Pagar',
+          pendingFmt + '\n' + `Total: ${totalFmt} (- ${paidFmt} adiantado)`,
+          '',
+          [245, 158, 11]
+        );
+      }
+    } else {
+      drawKPICard(
+        15,
+        'Faturamento Total',
+        totalFmt + '\n' + (baseFmt + extraFmt),
+        '',
+        [16, 185, 129]
+      );
+    }
 
     if (isSimples) {
+      const tarefasCount = videos.filter(v => v.tipo_item === 'outros' && v.feito).length;
+      const countLabel = (billing.billableVideoCount === 0 && tarefasCount > 0)
+        ? `${tarefasCount} TAREFAS`
+        : `${billing.billableVideoCount || 0} TOTAL`;
+      const titleLabel = (billing.billableVideoCount === 0 && tarefasCount > 0)
+        ? 'Tarefas Entregues'
+        : 'Vídeos Entregues';
+
       drawKPICard(
         15 + cardW + cardGap,
-        'Vídeos Entregues',
-        `${billing.billableVideoCount || 0} TOTAL`,
+        titleLabel,
+        countLabel,
         '',
         [255, 255, 255]
       );
@@ -1456,135 +1494,139 @@ function exportMonthlyReportPDF(
 
   const outrosVideos = videos.filter(v => v.tipo_item === 'outros' && v.feito);
   const filteredVideos = videos.filter(v => v.tipo_item !== 'outros');
+  const hasVideos = filteredVideos.length > 0 || outrosVideos.length === 0;
 
-  const tableHead = isSimples
-    ? [['STATUS', 'VIDEO / TITULO']]
-    : (showTime
-        ? [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO', 'RATIO']]
-        : [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO']]);
+  if (hasVideos) {
+    const tableHead = isSimples
+      ? [['STATUS', 'VIDEO / TITULO']]
+      : (showTime
+          ? [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO', 'RATIO']]
+          : [['STATUS', 'DETALHES DO TRABALHO', 'IDIOMAS', 'TEMPO']]);
 
-  doc.autoTable({
-    startY: startTableY,
-    head: tableHead,
+    doc.autoTable({
+      startY: startTableY,
+      head: tableHead,
 
-    body: filteredVideos.map(v => {
-      let status;
+      body: filteredVideos.map(v => {
+        let status;
 
-      if (!v.feito) {
-        status = 'PENDENTE';
-      } else if (v.cobrado === false) {
-        status = 'CORTESIA';
-      } else {
-        status = isSimples ? 'V CONCLUIDO' : '';
-      }
+        if (!v.feito) {
+          status = 'PENDENTE';
+        } else if (v.cobrado === false) {
+          status = 'CORTESIA';
+        } else {
+          status = isSimples ? 'V CONCLUIDO' : '';
+        }
 
-      const titleText = toSafePDF(v.titulo || '–').toUpperCase();
+        const titleText = toSafePDF(v.titulo || '–').toUpperCase();
 
-      if (isSimples) {
-        return [status, titleText];
-      }
+        if (isSimples) {
+          return [status, titleText];
+        }
 
-      const timeFmt = window.ExcelParser ? window.ExcelParser.secondsToHMS(v.tempo) : '00:00:00';
+        const timeFmt = window.ExcelParser ? window.ExcelParser.secondsToHMS(v.tempo) : '00:00:00';
 
-      const row = [
-        status,
-        titleText,
-        v.idiomas || 7,
-        toSafePDF(timeFmt)
-      ];
+        const row = [
+          status,
+          titleText,
+          v.idiomas || 7,
+          toSafePDF(timeFmt)
+        ];
 
-      if (showTime) {
-        const ratio = (v.tempo > 0 && v.tempo_fazer > 0) ? (v.tempo_fazer / v.tempo).toFixed(1) + 'x' : '–';
-        row.push(toSafePDF(ratio));
-      }
+        if (showTime) {
+          const ratio = (v.tempo > 0 && v.tempo_fazer > 0) ? (v.tempo_fazer / v.tempo).toFixed(1) + 'x' : '–';
+          row.push(toSafePDF(ratio));
+        }
 
-      return row;
-    }),
+        return row;
+      }),
 
-    styles: {
-      fontSize: 7.5,
-      textColor: [203, 213, 225],
-      fillColor: [10, 18, 30],
-      cellPadding: 3.5,
-      font: 'helvetica',
-      lineWidth: 0,
-      minCellHeight: 10,
-      valign: 'middle'
-    },
+      styles: {
+        fontSize: 7.5,
+        textColor: [203, 213, 225],
+        fillColor: [10, 18, 30],
+        cellPadding: 3.5,
+        font: 'helvetica',
+        lineWidth: 0,
+        minCellHeight: 10,
+        valign: 'middle'
+      },
 
-    headStyles: {
-      fillColor: [15, 23, 42],
-      textColor: [245, 158, 11],
-      fontStyle: 'bold',
-      fontSize: 7,
-      halign: 'left',
-      cellPadding: 4
-    },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [245, 158, 11],
+        fontStyle: 'bold',
+        fontSize: 7,
+        halign: 'left',
+        cellPadding: 4
+      },
 
-    alternateRowStyles: {
-      fillColor: [15, 23, 42]
-    },
+      alternateRowStyles: {
+        fillColor: [15, 23, 42]
+      },
 
-    columnStyles: isSimples ? {
-      0: { cellWidth: 32, fontStyle: 'bold' },
-      1: { cellWidth: 'auto' }
-    } : {
-      0: { cellWidth: 24, fontStyle: 'bold' },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 20, halign: 'center' },
-      3: { cellWidth: 24, halign: 'center', fontStyle: 'bold', textColor: [245, 158, 11] },
-      4: { cellWidth: 20, halign: 'center' }
-    },
+      columnStyles: isSimples ? {
+        0: { cellWidth: 32, fontStyle: 'bold' },
+        1: { cellWidth: 'auto' }
+      } : {
+        0: { cellWidth: 24, fontStyle: 'bold' },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 20, halign: 'center' },
+        3: { cellWidth: 24, halign: 'center', fontStyle: 'bold', textColor: [245, 158, 11] },
+        4: { cellWidth: 20, halign: 'center' }
+      },
 
-    didDrawCell: function(data) {
-      if (data.row.index !== undefined && data.section === 'body') {
-        doc.setDrawColor(30, 41, 59);
-        doc.setLineWidth(0.05);
+      didDrawCell: function(data) {
+        if (data.row.index !== undefined && data.section === 'body') {
+          doc.setDrawColor(30, 41, 59);
+          doc.setLineWidth(0.05);
 
-        doc.line(
-          data.cell.x,
-          data.cell.y + data.cell.height,
-          data.cell.x + data.cell.width,
-          data.cell.y + data.cell.height
-        );
+          doc.line(
+            data.cell.x,
+            data.cell.y + data.cell.height,
+            data.cell.x + data.cell.width,
+            data.cell.y + data.cell.height
+          );
 
-        if (data.column.index === 1) {
-          const item = filteredVideos[data.row.index];
-          if (item && item.link && item.link.trim()) {
-            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: item.link.trim() });
+          if (data.column.index === 1) {
+            const item = filteredVideos[data.row.index];
+            if (item && item.link && item.link.trim()) {
+              doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: item.link.trim() });
+            }
           }
         }
-      }
-    },
+      },
 
-    didParseCell: function(data) {
-      if (data.section === 'body') {
-        if (data.column.index === 0) {
-          if (data.cell.raw === 'CORTESIA') {
-            data.cell.styles.textColor = [96, 165, 250];
-          } else if (data.cell.raw === 'PENDENTE') {
-            data.cell.styles.textColor = [239, 68, 68];
-          } else if (data.cell.raw === 'V CONCLUIDO') {
-            data.cell.styles.textColor = [16, 185, 129];
-          }
-        } else if (data.column.index === 1) {
-          const item = filteredVideos[data.row.index];
-          if (item && item.link && item.link.trim()) {
-            data.cell.styles.textColor = [96, 165, 250];
+      didParseCell: function(data) {
+        if (data.section === 'body') {
+          if (data.column.index === 0) {
+            if (data.cell.raw === 'CORTESIA') {
+              data.cell.styles.textColor = [96, 165, 250];
+            } else if (data.cell.raw === 'PENDENTE') {
+              data.cell.styles.textColor = [239, 68, 68];
+            } else if (data.cell.raw === 'V CONCLUIDO') {
+              data.cell.styles.textColor = [16, 185, 129];
+            }
+          } else if (data.column.index === 1) {
+            const item = filteredVideos[data.row.index];
+            if (item && item.link && item.link.trim()) {
+              data.cell.styles.textColor = [96, 165, 250];
+            }
           }
         }
-      }
-    },
+      },
 
-    margin: {
-      left: 15,
-      right: 15
-    }
-  });
+      margin: {
+        left: 15,
+        right: 15
+      }
+    });
+  }
 
   if (outrosVideos.length > 0) {
-    const outrosStartY =
-      doc.lastAutoTable.finalY + 10;
+    const outrosStartY = hasVideos
+      ? doc.lastAutoTable.finalY + 10
+      : startTableY;
 
     doc.setTextColor(16, 185, 129);
     doc.setFontSize(8);

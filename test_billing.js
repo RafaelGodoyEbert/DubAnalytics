@@ -368,6 +368,22 @@ console.log('\n--- 12 CRITÉRIOS DE ACEITAÇÃO OBRIGATÓRIOS ---\n');
   console.log('✓ 13. Cálculo e transição do próximo mês (ex: Mai -> Jun, Dez -> Jan 2027) [PASSOU]');
 }
 
+// 14. Pagamento parcial (paid_amount) calcula saldo pendente sem distorcer o faturamento total do mês
+{
+  const mes = {
+    billing_mode: 'per_video',
+    base_payment: 0,
+    paid_amount: 500
+  };
+  // 7 diárias de 120 = R$ 840,00
+  const itens = Array(7).fill({ feito: true, cobrado: true, tipo_item: 'outros', valor_individual: 120 });
+  const res = calculateMonthlyBilling(mes, itens);
+  assert.strictEqual(res.total, 840);
+  assert.strictEqual(res.paidAmount, 500);
+  assert.strictEqual(res.pendingAmount, 340);
+  console.log('✓ 14. Pagamento parcial (paid_amount = 500): total = 840, pago = 500, a receber = 340 [PASSOU]');
+}
+
 console.log('\n===================================================================');
 console.log('TODOS OS TESTES FORAM CONCLUÍDOS COM 100% DE SUCESSO E CONFORMIDADE!');
 console.log('===================================================================');

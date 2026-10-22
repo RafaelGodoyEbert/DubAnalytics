@@ -241,12 +241,15 @@
                        </select>
                     </div>
                     <div class="cfg-item"><span>Bônus R$:</span> <input type="number" id="cfg-bonus" onchange="updateMonthConfig('bonus', this.value)"></div>
+                    <div class="cfg-item" title="Valor já pago ou adiantado pelo cliente neste mês"><span>Pago R$:</span> <input type="number" id="cfg-paid" step="0.01" onchange="updateMonthConfig('paid_amount', this.value)"></div>
                     <div class="cfg-item" id="cfg-item-comp" title="Ativar compensação acumulada de vídeos (débito/crédito)"><span>Compensar?</span> <label class="switch"><input type="checkbox" id="cfg-comp" onchange="updateMonthConfig('compensate', this.checked)"><span class="slider"></span></label></div>
                  </div>
 
                  <div class="stats-grid month-stats-grid">
                      <!-- Card Pagamento / Ganho Mês -->
-                     <div class="card"><small id="m-stat-pay-label">GANHO MÊS</small><div id="m-stat-pay" class="stat-value text-accent">R$ 0</div></div>
+                     <div class="card" title="Total faturado no mês"><small id="m-stat-pay-label">GANHO MÊS</small><div id="m-stat-pay" class="stat-value text-accent">R$ 0</div></div>
+                     <div class="card" id="m-stat-card-paid" onclick="quickEditPaidAmount()" style="cursor:pointer" title="Valor já pago ou adiantado pelo cliente (clique para editar)"><small>PAGO</small><div id="m-stat-paid" class="stat-value text-success">R$ 0,00</div></div>
+                     <div class="card" id="m-stat-card-pending" onclick="quickEditPaidAmount()" style="cursor:pointer" title="Saldo pendente a receber (clique para editar)"><small id="m-stat-pending-label">A RECEBER</small><div id="m-stat-pending" class="stat-value text-warning">R$ 0,00</div></div>
 
                      <!-- Cards Exclusivos do Modo Franquia de Minutos -->
                      <div class="card" id="m-stat-card-franchise" style="display:none" title="Franquia contratada de minutos no mês"><small>FRANQUIA</small><div id="m-stat-franchise" class="stat-value">0 min</div></div>
@@ -325,6 +328,6 @@
      <div id="modal-box" class="modal"></div>
   </div>
 
-  <script type="module" src="main.js?v=3.5"></script>
+  <script type="module" src="main.js?v=3.6"></script>
 </body>
 </html>
