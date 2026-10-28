@@ -11,7 +11,8 @@ window.State = {
   filters: { timeframe: 'month', year: 'all', showInactive: true },
   targetHourlyRate: 60,
   privacyMode: false,
-  user: null
+  user: null,
+  monthVideoFilter: ''
 };
 
 const State = window.State;
@@ -569,6 +570,9 @@ window.showClientOverview = function() {
 window.selectMonth = function(id) {
   State.selectedMonth = State.monthlyConfigs.find(function(m) { return m.id === id; });
   State.clientSubView = 'month';
+  State.monthVideoFilter = '';
+  var filterInput = document.getElementById('month-video-filter');
+  if (filterInput) filterInput.value = '';
   if (State.selectedMonth && State.selectedClient) {
     var y = getMonthYear(State.selectedMonth.label);
     if (y) {
@@ -1069,6 +1073,32 @@ function renderMonthDetails() {
 
   var tbody = document.getElementById('video-tbody');
 
+  // Filtro de busca na tabela do mês
+  var filterActive = !!(State.monthVideoFilter && State.monthVideoFilter.trim());
+  var filterInput = document.getElementById('month-video-filter');
+  if (filterInput && filterInput.value !== (State.monthVideoFilter || '')) {
+    filterInput.value = State.monthVideoFilter || '';
+  }
+  var clearFilterBtn = document.getElementById('clear-month-filter');
+  if (clearFilterBtn) clearFilterBtn.style.display = filterActive ? 'block' : 'none';
+
+  var countBadge = document.getElementById('month-video-count-badge');
+  var displayVideos = mVideos;
+  if (filterActive) {
+    displayVideos = mVideos.filter(function(v) {
+      return matchVideoByQuery(v, State.monthVideoFilter);
+    });
+    if (countBadge) {
+      countBadge.innerText = displayVideos.length + ' de ' + mVideos.length;
+      countBadge.style.color = 'var(--accent)';
+    }
+  } else {
+    if (countBadge) {
+      countBadge.innerText = mVideos.length + (mVideos.length === 1 ? ' item' : ' itens');
+      countBadge.style.color = 'var(--text-dim)';
+    }
+  }
+
   function renderVideoRow(v) {
     try {
       var isOutros = v.tipo_item === 'outros';
@@ -1082,7 +1112,7 @@ function renderMonthDetails() {
           : '<td><span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9px">OUTROS</span></td><td colspan="3"><div style="font-weight:600; cursor:pointer" onclick="openVideoModal(\'' + v.id + '\')" title="Clique para editar">' + (v.titulo || '\u2013') + (v.comentario ? ' <span title="' + v.comentario + '" style="cursor:help; margin-left:5px">\ud83d\udcac</span>' : '') + '</div><div style="font-size:10px; color:var(--text-dim)">Tarefa avulsa</div></td><td style="font-weight:700; color:#10b981">R$ ' + valorFmt + '</td>';
         var feitoCls = v.feito ? 'bg-done' : 'bg-todo';
         var feitoLbl = v.feito ? '\u2713 Feito' : '\u2717 Pend.';
-        return '<tr style="background:rgba(16,185,129,0.05); border-left:3px solid #10b981">' +
+        return '<tr id="row-' + v.id + '" style="background:rgba(16,185,129,0.05); border-left:3px solid #10b981">' +
           '<td><button class="badge ' + feitoCls + '" onclick="toggleVideoField(\'' + v.id + '\', \'feito\')">' + feitoLbl + '</button></td>' +
           outrosCols +
           '<td><button onclick="moveVideoToNextMonth(\'' + v.id + '\')" class="btn-ghost" title="Enviar para o próximo mês">➡️</button> <button onclick="openVideoModal(\'' + v.id + '\')" class="btn-ghost" title="Editar">\u270e</button> <button onclick="deleteVideo(\'' + v.id + '\')" class="btn-ghost" style="color:var(--danger)">\u2715</button></td>' +
@@ -1125,14 +1155,14 @@ function renderMonthDetails() {
 
       if (isSimples) {
         var sub = v.comentario ? '<div style="font-size:10px; color:var(--text-dim)">' + v.comentario + '</div>' : '';
-        return '<tr ' + rowStyle + '><td>' + statusBtn + '</td><td>' + titleDiv + sub + '</td>' + actions + '</tr>';
+        return '<tr id="row-' + v.id + '" ' + rowStyle + '><td>' + statusBtn + '</td><td>' + titleDiv + sub + '</td>' + actions + '</tr>';
       }
 
       var targetMinLimit = (m.target_video_min !== undefined) ? m.target_video_min : (State.selectedClient ? State.selectedClient.default_target_video_min || 15 : 15);
       var vMin = (parseFloat(v.tempo) || 0) / 60;
       var overBadge = (vMin > targetMinLimit) ? ' <span class="badge bg-danger" style="font-size:9px" title="Vídeo de ' + vMin.toFixed(0) + ' min (+' + (vMin - targetMinLimit).toFixed(0) + ' min acima da meta de ' + targetMinLimit + ' min)">+' + (vMin - targetMinLimit).toFixed(0) + 'm</span>' : '';
 
-      return '<tr ' + rowStyle + '>' +
+      return '<tr id="row-' + v.id + '" ' + rowStyle + '>' +
         '<td>' + statusBtn + '</td>' +
         '<td><button class="badge ' + (v.transcrito ? 'bg-info' : '') + '" onclick="toggleVideoField(\'' + v.id + '\', \'transcrito\')">' + (v.transcrito ? '\u270e Sim' : '\u2014 N\u00e3o') + '</button></td>' +
         '<td>' + titleDiv +
@@ -1153,10 +1183,10 @@ function renderMonthDetails() {
     }
   }
 
-  var rows = mVideos.map(renderVideoRow);
+  var rows = displayVideos.map(renderVideoRow);
 
   // Separador visual se houver itens "Outros"
-  if (outrosItems.length > 0 && videoItems.length > 0) {
+  if (outrosItems.length > 0 && videoItems.length > 0 && !filterActive) {
     var outrosEarnings = (billing && typeof billing.outrosAmount === 'number')
       ? billing.outrosAmount
       : outrosItems.filter(function(v) { return v.feito && v.cobrado !== false; }).reduce(function(s, v) { return s + (parseFloat(v.valor_individual) || 0); }, 0);
@@ -1175,7 +1205,18 @@ function renderMonthDetails() {
 
   if (rows.length === 0) {
     var colsCount = isSimples ? 3 : 7;
-    rows.push('<tr><td colspan="' + colsCount + '" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
+    if (filterActive) {
+      var safeTerm = (State.monthVideoFilter || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      rows.push('<tr><td colspan="' + colsCount + '" style="text-align:center; padding:35px 20px; color:var(--text-dim)">' +
+        '<div style="font-size:28px; margin-bottom:8px">🔍</div>' +
+        '<div style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:4px">Nenhum vídeo encontrado neste mês</div>' +
+        '<div style="font-size:11px; margin-bottom:14px">O link ou termo buscado não está cadastrado em ' + (m.label || 'este mês') + '.</div>' +
+        '<button onclick="openGlobalSearchModal(\'' + safeTerm + '\')" class="btn-accent" style="padding:8px 16px; font-size:11px">🔍 Buscar em Todos os Clientes</button> ' +
+        '<button onclick="clearMonthVideoFilter()" class="btn-ghost" style="padding:8px 16px; font-size:11px; margin-left:6px">Limpar Filtro</button>' +
+        '</td></tr>');
+    } else {
+      rows.push('<tr><td colspan="' + colsCount + '" style="text-align:center; padding:45px 20px; color:var(--text-dim)"><div style="font-size:32px; margin-bottom:10px">🎬</div><div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:6px">Nenhum item cadastrado neste mês</div><div style="font-size:12px; margin-bottom:15px">Comece adicionando seu primeiro vídeo ou tarefa avulsa.</div><button onclick="openVideoModal()" class="btn-accent" style="display:inline-block">+ Novo Vídeo</button></td></tr>');
+    }
   }
 
   if (tbody) tbody.innerHTML = rows.join('');
@@ -1620,7 +1661,7 @@ window.openVideoModal = function(videoId) {
 
       // campos só de vídeo
       '<div id="video-fields" style="display:contents; ' + videoFieldsStyle + '">' +
-        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Link do Vídeo (🔗)</label><input type="text" id="v-link" value="' + (v && v.link ? v.link : '') + '" placeholder="https://youtube.com/..."></div>' +
+        '<div class="form-group" style="' + videoFieldsStyle + '"><label>Link do Vídeo (🔗)</label><input type="text" id="v-link" value="' + (v && v.link ? v.link : '') + '" placeholder="https://youtube.com/..."><div id="v-link-feedback" style="font-size:10px; margin-top:4px; display:none"></div></div>' +
         '<div class="form-group" style="' + videoFieldsStyle + '"><label>Idiomas</label><input type="number" id="v-lang" value="' + (v ? v.idiomas : 7) + '"></div>' +
         '<div class="form-group" style="' + videoFieldsStyle + '"><label>Quantidade de Palavras</label><input type="number" id="v-palavras" value="' + (v && v.palavras ? v.palavras : 0) + '"></div>' +
         '<div class="form-group" style="' + videoFieldsStyle + '"><label>Total de Chars</label><input type="number" id="v-chars" value="' + (v ? v.chars : 0) + '"></div>' +
@@ -1652,6 +1693,11 @@ window.openVideoModal = function(videoId) {
   setTimeout(function() {
     var titleEl = document.getElementById('v-title');
     if (titleEl) titleEl.focus();
+    var linkEl = document.getElementById('v-link');
+    if (linkEl) {
+      linkEl.addEventListener('input', function() { updateVideoModalLinkFeedback(this.value, videoId); });
+      updateVideoModalLinkFeedback(linkEl.value, videoId);
+    }
   }, 100);
 };
 
@@ -1914,5 +1960,265 @@ function setupEventListeners() {
     }, 500);
   }
   setupSyncStatusListener();
+
+  // Atalhos de teclado: Ctrl+K / Cmd+K ou "/" para Pesquisa Global por Link
+  window.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      window.openGlobalSearchModal();
+    } else if (e.key === '/' && document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].indexOf(document.activeElement.tagName) === -1) {
+      e.preventDefault();
+      window.openGlobalSearchModal();
+    }
+  });
 }
 // boot() is called from AuthUI.init() - no duplicate DOMContentLoaded needed
+
+/* ========== SEARCH & YOUTUBE LINK INTELLIGENCE ========== */
+function extractYouTubeId(urlOrId) {
+  if (!urlOrId || typeof urlOrId !== 'string') return null;
+  var str = urlOrId.trim().replace(/^["'<]|["'>]$/g, '');
+  if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+  var match = str.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.(?:com|com\.br|ca|co\.uk)\/(?:embed\/|v\/|watch\?v=|watch\?.+?&v=|shorts\/|live\/))([a-zA-Z0-9_-]{11})/i);
+  if (match && match[1]) return match[1];
+  try {
+    var urlObj = new URL(str.indexOf('://') === -1 ? 'https://' + str : str);
+    if (urlObj.hostname.indexOf('youtube.') !== -1) {
+      var vParam = urlObj.searchParams.get('v');
+      if (vParam && /^[a-zA-Z0-9_-]{11}$/.test(vParam)) return vParam;
+      var pathParts = urlObj.pathname.split('/').filter(Boolean);
+      var lastPart = pathParts[pathParts.length - 1];
+      if (lastPart && /^[a-zA-Z0-9_-]{11}$/.test(lastPart)) return lastPart;
+    } else if (urlObj.hostname === 'youtu.be') {
+      var pathParts = urlObj.pathname.split('/').filter(Boolean);
+      if (pathParts[0] && /^[a-zA-Z0-9_-]{11}$/.test(pathParts[0])) return pathParts[0];
+    }
+  } catch (e) {}
+  return null;
+}
+
+function matchVideoByQuery(video, query) {
+  if (!query) return true;
+  var q = String(query).trim().replace(/^["'<]|["'>]$/g, '');
+  if (!q) return true;
+
+  var qYtId = extractYouTubeId(q);
+  var vYtId = video.link ? extractYouTubeId(video.link) : null;
+
+  // 1. YouTube ID match (identifica mesmo vídeo independente de watch, youtu.be, shorts ou parâmetros ?si=, ?t=)
+  if (qYtId && vYtId && (qYtId === vYtId || qYtId.toLowerCase() === vYtId.toLowerCase())) return true;
+  if (qYtId && video.link && video.link.indexOf(qYtId) !== -1) return true;
+
+  // 2. Direct & Normalized URL match
+  var qLower = q.toLowerCase();
+  if (video.link) {
+    var vLinkLower = video.link.toLowerCase();
+    if (vLinkLower.indexOf(qLower) !== -1 || qLower.indexOf(vLinkLower) !== -1) return true;
+    var cleanQ = qLower.replace(/^https?:\/\/(www\.)?/, '').replace(/[?&](si|t|feature|utm_[^=]+)=[^&]+/g, '').replace(/\/+$/, '');
+    var cleanV = vLinkLower.replace(/^https?:\/\/(www\.)?/, '').replace(/[?&](si|t|feature|utm_[^=]+)=[^&]+/g, '').replace(/\/+$/, '');
+    if (cleanQ.length > 3 && (cleanV.indexOf(cleanQ) !== -1 || cleanQ.indexOf(cleanV) !== -1)) return true;
+  }
+
+  // 3. Título (case-insensitive)
+  if (video.titulo && video.titulo.toLowerCase().indexOf(qLower) !== -1) return true;
+
+  // 4. Comentários / notas
+  if (video.comentario && video.comentario.toLowerCase().indexOf(qLower) !== -1) return true;
+
+  return false;
+}
+
+window.SearchUtils = {
+  extractYouTubeId: extractYouTubeId,
+  matchVideoByQuery: matchVideoByQuery
+};
+
+window.handleMonthVideoFilter = function(val) {
+  State.monthVideoFilter = val;
+  renderMonthDetails();
+};
+
+window.clearMonthVideoFilter = function() {
+  State.monthVideoFilter = '';
+  var inp = document.getElementById('month-video-filter');
+  if (inp) { inp.value = ''; inp.focus(); }
+  renderMonthDetails();
+};
+
+function updateVideoModalLinkFeedback(val, currentVideoId) {
+  var fb = document.getElementById('v-link-feedback');
+  if (!fb) return;
+  var str = (val || '').trim();
+  if (!str) {
+    fb.style.display = 'none';
+    fb.innerHTML = '';
+    return;
+  }
+  var ytId = extractYouTubeId(str);
+  var dup = null;
+  if (ytId) {
+    dup = State.videos.find(function(x) {
+      return x.id !== currentVideoId && x.link && extractYouTubeId(x.link) === ytId;
+    });
+  }
+  if (dup) {
+    var c = State.clients.find(function(cl) { return cl.id === dup.clientId; });
+    var clientName = c ? c.name : 'Outro cliente';
+    fb.style.display = 'block';
+    fb.innerHTML = '<span style="color:var(--danger); font-weight:600">⚠️ Já cadastrado em <strong>' + clientName + '</strong> (' + (dup.label || 'mês') + '): "' + (dup.titulo || 'Sem título') + '"</span>';
+  } else if (ytId) {
+    fb.style.display = 'block';
+    fb.innerHTML = '<span style="color:#10b981">✓ YouTube ID: <code>' + ytId + '</code> (reconhecido)</span>';
+  } else {
+    fb.style.display = 'none';
+    fb.innerHTML = '';
+  }
+}
+
+window.openGlobalSearchModal = function(initialQuery) {
+  var q = (initialQuery || '').trim();
+  var html = '' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">' +
+      '<h2 style="margin:0; font-size:18px; color:var(--accent); display:flex; align-items:center; gap:8px">' +
+        '<span>🔍</span> Pesquisar Vídeo por Link' +
+      '</h2>' +
+      '<button onclick="closeModal()" class="btn-ghost" style="padding:4px 10px; font-size:14px; border:none; color:var(--text-dim); cursor:pointer">✕</button>' +
+    '</div>' +
+    '<div style="margin-bottom:15px">' +
+      '<div style="position:relative">' +
+        '<input type="text" id="global-search-input" value="' + q.replace(/"/g, '&quot;') + '" placeholder="Cole o link do YouTube (watch, youtu.be, shorts...) ou digite o título..." style="width:100%; padding:12px 38px 12px 14px; font-size:13px; background:var(--panel-light); border:1px solid var(--border); border-radius:10px; color:var(--text); box-shadow:0 4px 12px rgba(0,0,0,0.2); outline:none" oninput="handleGlobalSearchInput(this.value)">' +
+        '<button id="global-search-clear" onclick="clearGlobalSearchInput()" style="display:' + (q ? 'block' : 'none') + '; position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px">✕</button>' +
+      '</div>' +
+      '<div id="global-search-hint" style="font-size:11px; color:var(--text-dim); margin-top:8px; display:flex; align-items:center; gap:6px">' +
+        '💡 <span>Identificação inteligente de vídeos do YouTube em qualquer formato (watch?v=, youtu.be, shorts, com/sem parâmetros).</span>' +
+      '</div>' +
+    '</div>' +
+    '<div id="global-search-results" style="max-height:420px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px"></div>';
+
+  showModal(html);
+  setTimeout(function() {
+    var inp = document.getElementById('global-search-input');
+    if (inp) {
+      inp.focus();
+      if (inp.value) inp.select();
+    }
+    renderGlobalSearchResults(q);
+  }, 80);
+};
+
+window.handleGlobalSearchInput = function(val) {
+  var clearBtn = document.getElementById('global-search-clear');
+  if (clearBtn) clearBtn.style.display = val ? 'block' : 'none';
+  renderGlobalSearchResults(val);
+};
+
+window.clearGlobalSearchInput = function() {
+  var inp = document.getElementById('global-search-input');
+  if (inp) { inp.value = ''; inp.focus(); }
+  var clearBtn = document.getElementById('global-search-clear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  renderGlobalSearchResults('');
+};
+
+window.renderGlobalSearchResults = function(query) {
+  var resultsEl = document.getElementById('global-search-results');
+  var hintEl = document.getElementById('global-search-hint');
+  if (!resultsEl) return;
+
+  var q = (query || '').trim();
+  if (!q) {
+    if (hintEl) {
+      hintEl.innerHTML = '💡 <span>Cole qualquer link do YouTube (watch, youtu.be, shorts) ou digite o título para localizar o cliente e mês correspondentes.</span>';
+    }
+    var totalVideosCount = State.videos.length;
+    var videosWithLinks = State.videos.filter(function(v) { return !!v.link; }).length;
+    resultsEl.innerHTML = '<div style="text-align:center; padding:35px 20px; color:var(--text-dim)">' +
+      '<div style="font-size:32px; margin-bottom:10px">🔗</div>' +
+      '<div style="font-size:13px; font-weight:600; color:var(--text); margin-bottom:6px">Pronto para buscar</div>' +
+      '<div style="font-size:11px; max-width:360px; margin:0 auto; line-height:1.5">' +
+        'Você tem <strong>' + totalVideosCount + ' vídeos</strong> no sistema (' + videosWithLinks + ' com link gravado). Cole o link recebido para ver cliente, mês e status imediatamente.' +
+      '</div>' +
+    '</div>';
+    return;
+  }
+
+  var ytId = extractYouTubeId(q);
+  if (hintEl) {
+    if (ytId) {
+      hintEl.innerHTML = '<span style="color:#10b981; font-weight:600">✓ ID do YouTube detectado:</span> <code style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 6px; border-radius:4px; font-weight:700">' + ytId + '</code> <span style="color:var(--text-dim)">(compatível com watch, youtu.be, shorts e parâmetros)</span>';
+    } else {
+      hintEl.innerHTML = '🔍 Buscando por termo / link em todos os clientes e meses...';
+    }
+  }
+
+  var matches = State.videos.filter(function(v) {
+    return matchVideoByQuery(v, q);
+  });
+
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<div style="text-align:center; padding:35px 20px; color:var(--text-dim)">' +
+      '<div style="font-size:28px; margin-bottom:8px">🔍</div>' +
+      '<div style="font-size:13px; font-weight:600; color:var(--text); margin-bottom:4px">Nenhum vídeo encontrado</div>' +
+      '<div style="font-size:11px; margin-bottom:15px">Nenhum item corresponde a <code>' + q.replace(/</g, '&lt;') + '</code>.</div>' +
+    '</div>';
+    return;
+  }
+
+  var cardsHtml = matches.map(function(v) {
+    var client = State.clients.find(function(c) { return c.id === v.clientId; });
+    var month = State.monthlyConfigs.find(function(m) { return m.id === v.monthId; });
+    var clientName = client ? client.name : 'Cliente desconhecido';
+    var monthLabel = month ? month.label : (v.label || 'Mês');
+
+    var isOutros = v.tipo_item === 'outros';
+    var curState = !v.feito ? 'todo' : (v.cobrado === false ? 'info' : 'done');
+    var stCls = curState === 'done' ? 'bg-done' : curState === 'info' ? 'bg-info' : 'bg-todo';
+    var stLabel = curState === 'done' ? '💰 Cobrado' : curState === 'info' ? '✓ Entregue' : '✗ Pendente';
+
+    var ratio = (!isOutros && v.tempo > 0 && parseFloat(v.tempo_fazer) > 0) ? (parseFloat(v.tempo_fazer) / v.tempo).toFixed(1) + 'x' : '–';
+    var durStr = isOutros ? 'Tarefa avulsa' : ExcelParser.secondsToHMS(v.tempo);
+    var workStr = isOutros ? '' : ExcelParser.secondsToHMS(v.tempo_fazer);
+
+    var linkBadge = v.link ? '<a href="' + v.link + '" target="_blank" onclick="event.stopPropagation()" class="btn-ghost" style="padding:3px 8px; font-size:11px; color:var(--accent); text-decoration:none" title="Abrir link original">🔗 Link Original</a>' : '';
+
+    return '<div class="card" style="padding:14px; background:var(--panel-light); border:1px solid var(--border); border-radius:10px; transition:border-color 0.2s; display:flex; flex-direction:column; gap:8px">' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap">' +
+        '<div style="display:flex; align-items:center; gap:6px">' +
+          '<span class="badge" style="background:rgba(245,158,11,0.15); color:var(--accent); font-weight:700; font-size:10px">👤 ' + clientName + '</span>' +
+          '<span class="badge" style="background:rgba(255,255,255,0.08); font-size:10px">📅 ' + monthLabel + '</span>' +
+        '</div>' +
+        '<span class="badge ' + stCls + '" style="font-size:10px">' + stLabel + '</span>' +
+      '</div>' +
+      '<div style="font-weight:700; font-size:14px; color:var(--text); line-height:1.3">' + (v.titulo || '–') + '</div>' +
+      (v.link ? '<div style="font-size:11px; color:var(--text-dim); word-break:break-all; font-family:var(--font-mono)">' + v.link + '</div>' : '') +
+      '<div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); flex-wrap:wrap; gap:8px">' +
+        '<div style="font-size:11px; color:var(--text-dim); display:flex; gap:10px">' +
+          (isOutros ? '<span style="color:#10b981; font-weight:700">R$ ' + (parseFloat(v.valor_individual) || 0).toLocaleString('pt-BR', {minimumFractionDigits:2}) + '</span>' : '<span>⏱ ' + durStr + '</span><span>💪 ' + workStr + '</span><span>⚡ Ratio: ' + ratio + '</span>') +
+        '</div>' +
+        '<div style="display:flex; align-items:center; gap:6px">' +
+          linkBadge +
+          '<button onclick="goToVideoMonth(\'' + v.clientId + '\', \'' + v.monthId + '\', \'' + v.id + '\')" class="btn-accent" style="padding:6px 14px; font-size:11px" title="Abrir e destacar este vídeo na tabela">Ir para o Mês ➔</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  resultsEl.innerHTML = '<div style="font-size:11px; color:var(--text-dim); margin-bottom:4px">Exibindo <strong>' + matches.length + '</strong> vídeo(s) encontrado(s):</div>' + cardsHtml;
+};
+
+window.goToVideoMonth = function(clientId, monthId, videoId) {
+  closeModal();
+  selectClient(clientId);
+  selectMonth(monthId);
+  setTimeout(function() {
+    var row = document.getElementById('row-' + videoId);
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.classList.add('highlight-row');
+      setTimeout(function() {
+        row.classList.remove('highlight-row');
+      }, 3500);
+    }
+  }, 350);
+};
+
