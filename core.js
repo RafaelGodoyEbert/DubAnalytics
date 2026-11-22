@@ -912,7 +912,7 @@ function renderMonthDetails() {
   var totalVids  = videoItems.length;
 
   if (isSimples && videoItems.length === 0 && outrosItems.length > 0) {
-    cobrados = outrosItems.filter(function(v) { return v.feito; }).length;
+    cobrados = outrosItems.filter(function(v) { return v.feito && v.cobrado !== false; }).length;
     totalVids = outrosItems.length;
   }
 
@@ -1036,7 +1036,7 @@ function renderMonthDetails() {
   }
 
   // Estatísticas de Minutos e Equivalência do Mês
-  var monthDoneVids = videoItems.filter(function(v) { return v.feito && parseDurSec(v.tempo) > 0; });
+  var monthDoneVids = videoItems.filter(function(v) { return isCobrado(v) && parseDurSec(v.tempo) > 0; });
   var monthVideoSec = monthDoneVids.reduce(function(s, v) { return s + parseDurSec(v.tempo); }, 0);
   var monthVideoMin = monthVideoSec / 60;
   var monthAvgMin = monthDoneVids.length > 0 ? monthVideoMin / monthDoneVids.length : 0;
@@ -1160,7 +1160,7 @@ function renderMonthDetails() {
 
       var targetMinLimit = (m.target_video_min !== undefined) ? m.target_video_min : (State.selectedClient ? State.selectedClient.default_target_video_min || 15 : 15);
       var vMin = (parseFloat(v.tempo) || 0) / 60;
-      var overBadge = (vMin > targetMinLimit) ? ' <span class="badge bg-danger" style="font-size:9px" title="Vídeo de ' + vMin.toFixed(0) + ' min (+' + (vMin - targetMinLimit).toFixed(0) + ' min acima da meta de ' + targetMinLimit + ' min)">+' + (vMin - targetMinLimit).toFixed(0) + 'm</span>' : '';
+      var overBadge = (vMin > targetMinLimit && isCobrado(v)) ? ' <span class="badge bg-danger" style="font-size:9px" title="Vídeo de ' + vMin.toFixed(0) + ' min (+' + (vMin - targetMinLimit).toFixed(0) + ' min acima da meta de ' + targetMinLimit + ' min)">+' + (vMin - targetMinLimit).toFixed(0) + 'm</span>' : '';
 
       return '<tr id="row-' + v.id + '" ' + rowStyle + '>' +
         '<td>' + statusBtn + '</td>' +

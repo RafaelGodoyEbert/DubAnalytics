@@ -1,6 +1,6 @@
 // test_billing.js - Testes automatizados cobrindo todos os casos e os 12 critérios de aceitação
 import assert from 'assert';
-import { calculateMonthlyBilling, parseDurationSec } from './analytics.js';
+import { calculateMonthlyBilling, parseDurationSec, getMinuteAnalytics } from './analytics.js';
 
 console.log('=== INICIANDO SUÍTE COMPLETA DE TESTES DO DUANALYTICS ===\n');
 
@@ -148,6 +148,33 @@ console.log('=== INICIANDO SUÍTE COMPLETA DE TESTES DO DUANALYTICS ===\n');
   assert.strictEqual(res.extraMinutes, 0);
   assert.strictEqual(res.total, 600);
   console.log('✓ CASO 7 (Não Cobrado): vídeo de 60 min entregue sem cobrança não aumentou pagamento [PASSOU]');
+}
+
+// CASO 7B - APENAS ENTREGUES (SEM COBRANÇA) NÃO COBRAM VALOR BASE NO MINUTE_OVERAGE
+{
+  const config = {
+    billing_mode: 'minute_overage',
+    base_payment: 600,
+    target_total_minutes: 225,
+    extra_minute_block: 15,
+    extra_minute_price: 40
+  };
+  const videos = [
+    { feito: true, cobrado: false, tempo: 15 * 60 }, // entregue
+    { feito: true, cobrado: false, tempo: 20 * 60 }, // entregue
+    { feito: false, cobrado: false, tempo: 10 * 60 } // pendente
+  ];
+  const res = calculateMonthlyBilling(config, videos);
+  assert.strictEqual(res.billableVideoCount, 0);
+  assert.strictEqual(res.billableMinutes, 0);
+  assert.strictEqual(res.extraMinutes, 0);
+  assert.strictEqual(res.extraAmount, 0);
+  assert.strictEqual(res.basePayment, 0);
+  assert.strictEqual(res.total, 0);
+  assert.strictEqual(res.pendingAmount, 0);
+  const minuteData = getMinuteAnalytics(videos, [config], 15, 15, 225);
+  assert.strictEqual(minuteData.hasData, false);
+  console.log('✓ CASO 7B (Apenas Entregues): vídeos apenas entregues não são cobrados (total = R$ 0,00 e analytics zerado) [PASSOU]');
 }
 
 // CASO 8 - OUTROS

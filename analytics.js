@@ -234,13 +234,18 @@ function calculateMinuteBilling(config, videos, context) {
     }
   }
 
-  const total = base + extraAmount + bonus + outrosEarnings;
+  // Base só é faturada se houver itens cobrados (vídeos normais ou tarefas avulsas) ou se não houver vídeos cadastrados
+  const hasVideos = videos.length > 0;
+  const hasBillable = cobradosCount > 0 || outrosItems.length > 0;
+  const effectiveBase = (!hasVideos || hasBillable) ? base : 0;
+
+  const total = effectiveBase + extraAmount + bonus + outrosEarnings;
   const paidAmount = parseFloat(config.paid_amount) || 0;
   const pendingAmount = Math.max(0, total - paidAmount);
 
   return {
     mode: 'minute_overage',
-    basePayment: base,
+    basePayment: effectiveBase,
     billableVideoCount: cobradosCount,
     billableMinutes: billableMinutes,
     includedMinutes: targetTotalMinutes,
@@ -2442,7 +2447,7 @@ function getMinuteAnalytics(videos, configs, targetMinPerVid, targetBaseVideos, 
     : (targetMinPerVid * targetBaseVideos);
 
   const doneVideos = videos.filter(
-    v => v && v.feito && v.tipo_item !== 'outros' && parseDurationSec(v.tempo) > 0
+    v => v && isVideoCobrado(v) && v.tipo_item !== 'outros' && parseDurationSec(v.tempo) > 0
   );
 
   if (doneVideos.length === 0) {
@@ -2912,5 +2917,6 @@ export {
   calculatePerVideoBilling,
   calculateMinuteBilling,
   parseDurationSec,
+  getMinuteAnalytics,
   Analytics
 };
